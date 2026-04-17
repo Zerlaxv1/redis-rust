@@ -34,43 +34,47 @@ fn main() {
             }
         }
 
-        // essaie de répondre, prob a modifier
-        for stream in &mut list_streams {
-            handle_connection(stream);
-        }
+        // cleanup list
+        list_streams.retain_mut(|stream| {
+            handle_connection(stream)
+        });
     }
 }
 
-fn handle_connection(stream: &mut TcpStream) {
+fn handle_connection(stream: &mut TcpStream) -> bool {
     let buffer_response = b"+PONG\r\n";
     let mut buffer_input = [0; 512];
 
     // write input to buffer
-    let input = stream.read(&mut buffer_input);
+    let input: Result<usize, std::io::Error> = stream.read(&mut buffer_input);
 
     // if not input, ignore
     match input {
         Ok(bytes) => {
             if bytes == 0 {
-                return;
+                return false;
             }
 
             // envoyer la réponse
-            let result = stream.write_all(buffer_response);
+            let result: Result<(), std::io::Error> = stream.write_all(buffer_response);
 
             match result {
                 Ok(_) => {
-                    println!("Réponse envoyer avec succes !")
+                    println!("Réponse envoyer avec succes !");
+                    return true;
                 }
                 Err(_) => {
-                    eprintln!("Erreur lors de l'envoie de la réponse")
+                    eprintln!("Erreur lors de l'envoie de la réponse");
+                    return false;
                 }
             }
         }
         Err(e) => {
             if e.kind() != ErrorKind::WouldBlock {
-                eprintln!("Erreur lors de la lecture de l'input")
+                eprintln!("Erreur lors de la lecture de l'input");
+                return true;
             }
+            return false;
         }
     }
 }
