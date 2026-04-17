@@ -12,41 +12,45 @@ fn main() {
 
     for stream in listener.incoming() {
         match stream {
-            Ok(mut stream) => {
+            Ok(stream) => {
                 println!("accepted new connection");
-                let buffer_response = b"+PONG\r\n";
-                let mut buffer_input = [0; 512];
-
-                // loop over potential multiple commands
-                loop {
-                    // write input to buffer
-                    let input = stream.read(&mut buffer_input);
-
-                    // if not input, ignore
-                    match input {
-                        Ok(bytes) => {
-                            if bytes == 0 {
-                                return;
-                            }
-                        }
-                        Err(_) => {
-                            print!("Erreur lors de la lecture de l'input")
-                        }
-                    }
-
-                    let result = stream.write_all(buffer_response);
-                    match result {
-                        Ok(_) => {
-                            print!("Réponse envoyer avec succes !")
-                        }
-                        Err(_) => {
-                            print!("Erreur lors de l'envoie de la réponse")
-                        }
-                    }
-                }
+                handle_connection(stream);
             }
             Err(e) => {
                 println!("error: {}", e);
+            }
+        }
+    }
+}
+
+fn handle_connection(mut stream: TcpStream) {
+    let buffer_response = b"+PONG\r\n";
+    let mut buffer_input = [0; 512];
+
+    // loop over potential multiple commands
+    loop {
+        // write input to buffer
+        let input = stream.read(&mut buffer_input);
+
+        // if not input, ignore
+        match input {
+            Ok(bytes) => {
+                if bytes == 0 {
+                    return;
+                }
+            }
+            Err(_) => {
+                print!("Erreur lors de la lecture de l'input")
+            }
+        }
+
+        let result = stream.write_all(buffer_response);
+        match result {
+            Ok(_) => {
+                print!("Réponse envoyer avec succes !")
+            }
+            Err(_) => {
+                print!("Erreur lors de l'envoie de la réponse")
             }
         }
     }
