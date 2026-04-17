@@ -70,11 +70,11 @@ fn handle_connection(stream: &mut TcpStream) -> bool {
             }
         }
         Err(e) => {
-            if e.kind() != ErrorKind::WouldBlock {
-                return false;
+            if e.kind() == ErrorKind::WouldBlock {
+                return true;
             }
             eprintln!("Erreur lors de la lecture de l'input");
-            return true;
+            return false;
         }
     }
 }
