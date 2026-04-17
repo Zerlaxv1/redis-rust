@@ -40,7 +40,6 @@ async fn handle_connection(mut stream: TcpStream) {
 
                 match result {
                     Ok(_) => {
-                        return;
                     }
                     Err(_) => {
                         eprintln!("Erreur lors de l'envoie de la réponse");
