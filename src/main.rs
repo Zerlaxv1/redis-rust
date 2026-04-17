@@ -34,8 +34,7 @@ fn main() {
                         }
                     }
 
-                    // try to use write_all
-                    let result = stream.write(bufferResponse);
+                    let result = stream.write_all(bufferResponse);
                     match result {
                         Ok(_) => {
                             print!("Réponse envoyer avec succes !")
