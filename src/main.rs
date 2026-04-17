@@ -39,8 +39,7 @@ async fn handle_connection(mut stream: TcpStream) {
                 let result: Result<(), std::io::Error> = stream.write_all(buffer_response).await;
 
                 match result {
-                    Ok(_) => {
-                    }
+                    Ok(_) => {}
                     Err(_) => {
                         eprintln!("Erreur lors de l'envoie de la réponse");
                         return;
