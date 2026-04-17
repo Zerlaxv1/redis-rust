@@ -1,56 +1,75 @@
 #![allow(unused_imports)]
 use std::{
-    io::{Read, Write},
+    io::{ErrorKind, Read, Write},
     net::{TcpListener, TcpStream},
+    vec,
 };
 
 fn main() {
-    // You can use print statements as follows for debugging, they'll be visible when running tests.
-    println!("Logs from your program will appear here!");
-
+    // bind to :6379
     let listener: TcpListener = TcpListener::bind("127.0.0.1:6379").unwrap();
 
-    for stream in listener.incoming() {
-        match stream {
-            Ok(stream) => {
-                println!("accepted new connection");
-                handle_connection(stream);
+    // set non blocking
+    listener.set_nonblocking(true).unwrap();
+
+    let mut list_streams: Vec<TcpStream> = vec![];
+
+    // main loop
+    loop {
+        // accepte new incoming connections
+        for stream in listener.incoming() {
+            match stream {
+                Ok(stream) => {
+                    println!("accepted new connection");
+                    stream.set_nonblocking(true).unwrap();
+                    list_streams.push(stream);
+                }
+                Err(e) => {
+                    if e.kind() == ErrorKind::WouldBlock {
+                        break;
+                    } else {
+                        eprint!("Erreur lors de la connection : {}", e)
+                    }
+                }
             }
-            Err(e) => {
-                println!("error: {}", e);
-            }
+        }
+
+        // essaie de répondre, prob a modifier
+        for stream in &mut list_streams {
+            handle_connection(stream);
         }
     }
 }
 
-fn handle_connection(mut stream: TcpStream) {
+fn handle_connection(stream: &mut TcpStream) {
     let buffer_response = b"+PONG\r\n";
     let mut buffer_input = [0; 512];
 
-    // loop over potential multiple commands
-    loop {
-        // write input to buffer
-        let input = stream.read(&mut buffer_input);
+    // write input to buffer
+    let input = stream.read(&mut buffer_input);
 
-        // if not input, ignore
-        match input {
-            Ok(bytes) => {
-                if bytes == 0 {
-                    return;
+    // if not input, ignore
+    match input {
+        Ok(bytes) => {
+            if bytes == 0 {
+                return;
+            }
+
+            // envoyer la réponse
+            let result = stream.write_all(buffer_response);
+
+            match result {
+                Ok(_) => {
+                    println!("Réponse envoyer avec succes !")
+                }
+                Err(_) => {
+                    eprintln!("Erreur lors de l'envoie de la réponse")
                 }
             }
-            Err(_) => {
-                print!("Erreur lors de la lecture de l'input")
-            }
         }
-
-        let result = stream.write_all(buffer_response);
-        match result {
-            Ok(_) => {
-                print!("Réponse envoyer avec succes !")
-            }
-            Err(_) => {
-                print!("Erreur lors de l'envoie de la réponse")
+        Err(e) => {
+            if e.kind() != ErrorKind::WouldBlock {
+                eprintln!("Erreur lors de la lecture de l'input")
             }
         }
     }
