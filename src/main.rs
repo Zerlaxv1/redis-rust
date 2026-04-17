@@ -29,7 +29,7 @@ fn main() {
                                 return;
                             }
                         }
-                        Err(bytes) => {
+                        Err(_) => {
                             print!("Erreur lors de la lecture de l'input")
                         }
                     }
