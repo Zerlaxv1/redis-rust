@@ -1,6 +1,6 @@
 #![allow(unused_imports)]
 use std::{
-    io::Write,
+    io::{Read, Write},
     net::{TcpListener, TcpStream},
 };
 
@@ -14,12 +14,28 @@ fn main() {
         match stream {
             Ok(mut stream) => {
                 println!("accepted new connection");
-                let buffer = b"+PONG\r\n";
+                let bufferResponse = b"+PONG\r\n";
+                let mut bufferInput = [0; 512];
 
                 // loop over potential multiple commands
                 loop {
+                    // write input to buffer
+                    let input = stream.read(&mut bufferInput);
+
+                    // if not input, ignore
+                    match input {
+                        Ok(bytes) => {
+                            if bytes == 0 {
+                                return;
+                            }
+                        }
+                        Err(bytes) => {
+                            print!("Erreur lors de la lecture de l'input")
+                        }
+                    }
+
                     // try to use write_all
-                    let result = stream.write(buffer);
+                    let result = stream.write(bufferResponse);
                     match result {
                         Ok(_) => {
                             print!("Réponse envoyer avec succes !")
