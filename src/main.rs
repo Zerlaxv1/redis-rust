@@ -14,13 +14,13 @@ fn main() {
         match stream {
             Ok(mut stream) => {
                 println!("accepted new connection");
-                let bufferResponse = b"+PONG\r\n";
-                let mut bufferInput = [0; 512];
+                let buffer_response = b"+PONG\r\n";
+                let mut buffer_input = [0; 512];
 
                 // loop over potential multiple commands
                 loop {
                     // write input to buffer
-                    let input = stream.read(&mut bufferInput);
+                    let input = stream.read(&mut buffer_input);
 
                     // if not input, ignore
                     match input {
@@ -34,7 +34,7 @@ fn main() {
                         }
                     }
 
-                    let result = stream.write_all(bufferResponse);
+                    let result = stream.write_all(buffer_response);
                     match result {
                         Ok(_) => {
                             print!("Réponse envoyer avec succes !")
