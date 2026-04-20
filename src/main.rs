@@ -40,15 +40,24 @@ async fn handle_connection(mut stream: TcpStream) {
         match frame.next().await {
             Some(Ok(value)) => {
                 let response: &[u8] = match value {
-                    RedisValueRef::String(bytes) => {
-                        match bytes == "PING" {
-                            true => b"PONG",
-                            false => todo!(),
-                        }
-                    }
+                    RedisValueRef::String(bytes) => match bytes == "PING" {
+                        true => b"PONG",
+                        false => todo!(),
+                    },
                     RedisValueRef::Error(bytes) => todo!(),
                     RedisValueRef::Int(_) => todo!(),
-                    RedisValueRef::Array(redis_value_refs) => todo!(),
+                    RedisValueRef::Array(elements) => match &elements[0] {
+                        RedisValueRef::String(cmd) => match cmd == "PING" {
+                            true => b"PONG",
+                            false => todo!(),
+                        },
+                        RedisValueRef::Error(bytes) => todo!(),
+                        RedisValueRef::Int(_) => todo!(),
+                        RedisValueRef::Array(redis_value_refs) => todo!(),
+                        RedisValueRef::NullArray => todo!(),
+                        RedisValueRef::NullBulkString => todo!(),
+                        RedisValueRef::ErrorMsg(items) => todo!(),
+                    },
                     RedisValueRef::NullArray => todo!(),
                     RedisValueRef::NullBulkString => todo!(),
                     RedisValueRef::ErrorMsg(items) => todo!(),
