@@ -234,3 +234,9 @@ impl Decoder for RespParser {
         }
     }
 }
+
+impl From<std::io::Error> for RESPError {
+    fn from(e: std::io::Error) -> RESPError {
+        RESPError::IOError(e)
+    }
+}
