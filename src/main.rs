@@ -65,6 +65,7 @@ async fn handle_connection(mut stream: TcpStream) {
 }
 
 fn handle_command(value: RedisValueRef) -> Vec<u8> {
+    println!("{:?}", value);
     match value {
         RedisValueRef::String(bytes) => match *bytes == *b"PING" {
             true => b"+PONG\r\n".to_vec(),
