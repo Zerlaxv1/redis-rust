@@ -120,7 +120,25 @@ fn handle_command(value: RedisValueRef, mut arc: &Arc<Mutex<HashMap<String, Stri
                             b"-ERR SET argument must be a string\r\n".to_vec()
                         }
                     }
-                    b"GET" => b"2".to_vec(),
+                    b"GET" => {
+                        if elements.len() < 2 {
+                            return b"-ERR wrong number of arguments for GET cmd \r\n".to_vec();
+                        }
+                        if let RedisValueRef::String(key) = &elements[1] {
+                            let mut store = arc.lock().unwrap();
+                            let r = store.get(&String::from_utf8_lossy(key).to_string());
+                            match r {
+                                Some(result) => {
+                                    return result.as_bytes().to_vec();
+                                }
+                                None => {
+                                    return b"$-1\r\n".to_vec();
+                                }
+                            }
+                        } else {
+                            b"-ERR GET argument must be a string\r\n".to_vec()
+                        }
+                    }
                     _ => todo!(),
                 },
                 _ => b"-ERR command must be a STRING\r\n".to_vec(),
