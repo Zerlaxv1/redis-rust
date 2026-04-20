@@ -71,7 +71,7 @@ async fn handle_connection(mut stream: TcpStream, arc: Arc<Mutex<HashMap<String,
     }
 }
 
-fn handle_command(value: RedisValueRef, mut arc: &Arc<Mutex<HashMap<String, String>>>) -> Vec<u8> {
+fn handle_command(value: RedisValueRef, arc: &Arc<Mutex<HashMap<String, String>>>) -> Vec<u8> {
     match value {
         RedisValueRef::String(bytes) => match &bytes[..] {
             b"PING" => b"+PONG\r\n".to_vec(),
@@ -111,7 +111,7 @@ fn handle_command(value: RedisValueRef, mut arc: &Arc<Mutex<HashMap<String, Stri
                             && let RedisValueRef::String(value) = &elements[2]
                         {
                             let mut store = arc.lock().unwrap();
-                            let r = store.insert(
+                            store.insert(
                                 String::from_utf8_lossy(key).to_string(),
                                 String::from_utf8_lossy(value).to_string(),
                             );
