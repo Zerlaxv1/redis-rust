@@ -83,7 +83,7 @@ fn handle_command(value: RedisValueRef) -> Vec<u8> {
 
             let command = &elements[0];
             match command {
-                RedisValueRef::String(bytes) => match &bytes[..] {
+                RedisValueRef::String(bytes) => match &bytes.to_ascii_uppercase()[..] {
                     b"PING" => b"+PONG\r\n".to_vec(),
                     b"ECHO" => {
                         if elements.len() < 2 {
@@ -97,6 +97,7 @@ fn handle_command(value: RedisValueRef) -> Vec<u8> {
                         }
                     }
                     b"SET" => b"test".to_vec(),
+                    b"GET" => b"2".to_vec(),
                     _ => todo!(),
                 },
                 _ => b"-ERR command must be a STRING\r\n".to_vec(),
