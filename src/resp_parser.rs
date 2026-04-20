@@ -1,4 +1,3 @@
-// RESP language
 use bytes::{Bytes, BytesMut};
 use memchr::memchr;
 use std::convert::From;
@@ -10,6 +9,22 @@ use tokio_util::codec::{Decoder, Encoder};
 // https://redis.io/docs/latest/develop/reference/protocol-spec/#arrays
 // https://dpbriggs.ca/blog/Implementing-A-Copyless-Redis-Protocol-in-Rust-With-Parsing-Combinators/
 
+/// The struct we're using. We don't need to store anything in the struct.
+/// Later on we can expand this struct for optimization purposes.
+#[derive(Default)]
+pub struct RespParser;
+
+/// Fundamental struct for viewing byte slices
+///
+/// Used for zero-copy redis values.
+struct BufSplit(usize, usize);
+
+type RedisResult = Result<Option<(usize, RedisBufSplit)>, RESPError>;
+
+
+//// Enums ////
+
+
 /// RedisValueRef is the canonical type for values flowing
 /// through the system. Inputs are converted into RedisValues,
 /// and outputs are converted into RedisValues.
@@ -19,22 +34,6 @@ pub enum RedisValueRef {
     Error(Bytes),
     Int(i64),
     Array(Vec<RedisValueRef>),
-    NullArray,
-    NullBulkString,
-    ErrorMsg(Vec<u8>), // This is not a RESP type. This is an redis-oxide internal error type.
-}
-
-/// Fundamental struct for viewing byte slices
-///
-/// Used for zero-copy redis values.
-struct BufSplit(usize, usize);
-
-/// BufSplit based equivalent to our output type RedisValueRef
-enum RedisBufSplit {
-    String(BufSplit),
-    Error(BufSplit),
-    Int(i64),
-    Array(Vec<RedisBufSplit>),
     NullArray,
     NullBulkString,
 }
@@ -49,7 +48,83 @@ pub enum RESPError {
     BadArraySize(i64),
 }
 
-type RedisResult = Result<Option<(usize, RedisBufSplit)>, RESPError>;
+/// BufSplit based equivalent to our output type RedisValueRef
+enum RedisBufSplit {
+    String(BufSplit),
+    Error(BufSplit),
+    Int(i64),
+    Array(Vec<RedisBufSplit>),
+    NullArray,
+    NullBulkString,
+}
+
+
+//// Implementations ////
+
+
+// First, we need a convenient way to convert our index pairs into byte slices.
+impl BufSplit {
+    /// Get a lifetime appropriate slice of the underlying buffer.
+    ///
+    /// Constant time.
+    #[inline]
+    fn as_slice<'a>(&self, buf: &'a BytesMut) -> &'a [u8] {
+        &buf[self.0..self.1]
+    }
+
+    /// Get a Bytes object representing the appropriate slice
+    /// of bytes.
+    ///
+    /// Constant time.
+    #[inline]
+    fn as_bytes(&self, buf: &Bytes) -> Bytes {
+        buf.slice(self.0..self.1)
+    }
+}
+// Second, we'll need to convert a RedisBufSplit -> RedisValueRef given a Bytes buffer.
+impl RedisBufSplit {
+    fn redis_value(self, buf: &Bytes) -> RedisValueRef {
+        match self {
+            // bfs is BufSplit(start, end), which has the as_bytes method defined above
+            RedisBufSplit::String(bfs) => RedisValueRef::String(bfs.as_bytes(buf)),
+            RedisBufSplit::Error(bfs) => RedisValueRef::Error(bfs.as_bytes(buf)),
+            RedisBufSplit::Array(arr) => {
+                RedisValueRef::Array(arr.into_iter().map(|bfs| bfs.redis_value(buf)).collect())
+            }
+            RedisBufSplit::NullArray => RedisValueRef::NullArray,
+            RedisBufSplit::NullBulkString => RedisValueRef::NullBulkString,
+            RedisBufSplit::Int(i) => RedisValueRef::Int(i),
+        }
+    }
+}
+
+impl Decoder for RespParser {
+    type Item = RedisValueRef;
+    type Error = RESPError;
+    fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        if buf.is_empty() {
+            return Ok(None);
+        }
+
+        match parse(buf, 0)? {
+            Some((pos, value)) => {
+                // We parsed a value! Shave off the bytes so tokio can continue filling the buffer.
+                let our_data = buf.split_to(pos);
+                // Use `redis_value` defined above to get the correct type
+                Ok(Some(value.redis_value(&our_data.freeze())))
+            }
+            None => Ok(None),
+        }
+    }
+}
+
+impl From<std::io::Error> for RESPError {
+    fn from(e: std::io::Error) -> RESPError {
+        RESPError::IOError(e)
+    }
+}
+
+//// functions ////
 
 /// Get a word from `buf` starting at `pos`
 #[inline]
@@ -169,74 +244,5 @@ fn array(buf: &BytesMut, pos: usize) -> RedisResult {
         }
         // Client sent us a garbage size (num_elements < -1)
         Some((_pos, bad_num_elements)) => Err(RESPError::BadArraySize(bad_num_elements)),
-    }
-}
-
-// First, we need a convenient way to convert our index pairs into byte slices.
-impl BufSplit {
-    /// Get a lifetime appropriate slice of the underlying buffer.
-    ///
-    /// Constant time.
-    #[inline]
-    fn as_slice<'a>(&self, buf: &'a BytesMut) -> &'a [u8] {
-        &buf[self.0..self.1]
-    }
-
-    /// Get a Bytes object representing the appropriate slice
-    /// of bytes.
-    ///
-    /// Constant time.
-    #[inline]
-    fn as_bytes(&self, buf: &Bytes) -> Bytes {
-        buf.slice(self.0..self.1)
-    }
-}
-// Second, we'll need to convert a RedisBufSplit -> RedisValueRef given a Bytes buffer.
-impl RedisBufSplit {
-    fn redis_value(self, buf: &Bytes) -> RedisValueRef {
-        match self {
-            // bfs is BufSplit(start, end), which has the as_bytes method defined above
-            RedisBufSplit::String(bfs) => RedisValueRef::String(bfs.as_bytes(buf)),
-            RedisBufSplit::Error(bfs) => RedisValueRef::Error(bfs.as_bytes(buf)),
-            RedisBufSplit::Array(arr) => {
-                RedisValueRef::Array(arr.into_iter().map(|bfs| bfs.redis_value(buf)).collect())
-            }
-            RedisBufSplit::NullArray => RedisValueRef::NullArray,
-            RedisBufSplit::NullBulkString => RedisValueRef::NullBulkString,
-            RedisBufSplit::Int(i) => RedisValueRef::Int(i),
-        }
-    }
-}
-
-// fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error>;
-
-/// The struct we're using. We don't need to store anything in the struct.
-/// Later on we can expand this struct for optimization purposes.
-#[derive(Default)]
-pub struct RespParser;
-
-impl Decoder for RespParser {
-    type Item = RedisValueRef;
-    type Error = RESPError;
-    fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        if buf.is_empty() {
-            return Ok(None);
-        }
-
-        match parse(buf, 0)? {
-            Some((pos, value)) => {
-                // We parsed a value! Shave off the bytes so tokio can continue filling the buffer.
-                let our_data = buf.split_to(pos);
-                // Use `redis_value` defined above to get the correct type
-                Ok(Some(value.redis_value(&our_data.freeze())))
-            }
-            None => Ok(None),
-        }
-    }
-}
-
-impl From<std::io::Error> for RESPError {
-    fn from(e: std::io::Error) -> RESPError {
-        RESPError::IOError(e)
     }
 }
