@@ -125,11 +125,11 @@ fn handle_command(value: RedisValueRef, mut arc: &Arc<Mutex<HashMap<String, Stri
                             return b"-ERR wrong number of arguments for GET cmd \r\n".to_vec();
                         }
                         if let RedisValueRef::String(key) = &elements[1] {
-                            let mut store = arc.lock().unwrap();
+                            let store = arc.lock().unwrap();
                             let r = store.get(&String::from_utf8_lossy(key).to_string());
                             match r {
                                 Some(result) => {
-                                    return result.as_bytes().to_vec();
+                                    format!("${}\r\n{}\r\n", result.len(), result).into_bytes()
                                 }
                                 None => {
                                     return b"$-1\r\n".to_vec();
