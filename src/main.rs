@@ -115,7 +115,7 @@ fn handle_command(value: RedisValueRef, mut arc: &Arc<Mutex<HashMap<String, Stri
                                 String::from_utf8_lossy(key).to_string(),
                                 String::from_utf8_lossy(value).to_string(),
                             );
-                            return b"-OK\r\n".to_vec();
+                            return b"+OK\r\n".to_vec();
                         } else {
                             b"-ERR SET argument must be a string\r\n".to_vec()
                         }
