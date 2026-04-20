@@ -1,10 +1,15 @@
 #![allow(unused_imports)]
-use bytes::{Bytes};
+use bytes::Bytes;
 use std::{io::ErrorKind, vec};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
 };
+use tokio_stream::{Stream, StreamExt};
+use tokio_util::codec::FramedRead;
+
+use crate::resp_parser::{RedisValueRef, RespParser};
+
 mod resp_parser;
 
 #[tokio::main]
@@ -23,22 +28,34 @@ async fn main() {
 }
 
 async fn handle_connection(mut stream: TcpStream) {
-    let buffer_response = b"+PONG\r\n";
-    let mut buffer_input = [0; 512];
+    // diviser le stream en 2 partie, read et write pour le borrow checkekr
+    let (read_stream, mut write_stream) = stream.split();
 
+    // lire le stream avec tokio, il le lit, puis le passe auto danss le decoder RESP. Il en sort un RedisValueRef
+    let mut frame = FramedRead::new(read_stream, RespParser);
+
+    // loop sur plusieurs commands
     loop {
-        // write input to buffer
-        let input: Result<usize, std::io::Error> = stream.read(&mut buffer_input).await;
-
-        // if not input, ignore
-        match input {
-            Ok(bytes) => {
-                if bytes == 0 {
-                    return;
-                }
+        // si il existe un prochain mot
+        match frame.next().await {
+            Some(Ok(value)) => {
+                let response: &[u8] = match value {
+                    RedisValueRef::String(bytes) => {
+                        match bytes == "PING" {
+                            true => b"PONG",
+                            false => todo!(),
+                        }
+                    }
+                    RedisValueRef::Error(bytes) => todo!(),
+                    RedisValueRef::Int(_) => todo!(),
+                    RedisValueRef::Array(redis_value_refs) => todo!(),
+                    RedisValueRef::NullArray => todo!(),
+                    RedisValueRef::NullBulkString => todo!(),
+                    RedisValueRef::ErrorMsg(items) => todo!(),
+                };
 
                 // envoyer la réponse
-                let result: Result<(), std::io::Error> = stream.write_all(buffer_response).await;
+                let result: Result<(), std::io::Error> = write_stream.write_all(response).await;
 
                 match result {
                     Ok(_) => {}
@@ -48,8 +65,11 @@ async fn handle_connection(mut stream: TcpStream) {
                     }
                 }
             }
-            Err(_) => {
+            Some(Err(_)) => {
                 eprintln!("Erreur lors de la lecture de l'input");
+                return;
+            }
+            None => {
                 return;
             }
         }
