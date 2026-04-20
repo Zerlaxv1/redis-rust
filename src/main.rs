@@ -1,9 +1,11 @@
 #![allow(unused_imports)]
+use bytes::{Bytes};
 use std::{io::ErrorKind, vec};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
 };
+mod resp_parser;
 
 #[tokio::main]
 async fn main() {
@@ -52,16 +54,4 @@ async fn handle_connection(mut stream: TcpStream) {
             }
         }
     }
-}
-
-fn RESP_parser() {
-    // input :
-    // *2\r\n$4\r\nECHO\r\n$3\r\nhey\r\n
-    // output :
-    // ["ECHO", "hey"]
-    // doc :
-    // https://redis.io/docs/latest/develop/reference/protocol-spec/#arrays
-    // https://dpbriggs.ca/blog/Implementing-A-Copyless-Redis-Protocol-in-Rust-With-Parsing-Combinators/
-
-    
 }
