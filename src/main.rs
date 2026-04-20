@@ -67,18 +67,41 @@ async fn handle_connection(mut stream: TcpStream) {
 fn handle_command(value: RedisValueRef) -> Vec<u8> {
     println!("{:?}", value);
     match value {
-        RedisValueRef::String(bytes) => match *bytes == *b"PING" {
-            true => b"+PONG\r\n".to_vec(),
-            // faire un genre de switch ??
-            false => todo!(),
+        RedisValueRef::String(bytes) => match &bytes[..] {
+            b"PING" => b"+PONG\r\n".to_vec(),
+            _ => todo!(),
         },
-        RedisValueRef::Error(bytes) => {
+        RedisValueRef::Error(_bytes) => {
             return b"+ERROR\r\n".to_vec();
         }
         RedisValueRef::Int(_) => {
             return b"+INT\r\n".to_vec();
         }
-        RedisValueRef::Array(mut elements) => return handle_command(elements.remove(0)),
+        RedisValueRef::Array(elements) => {
+            if elements.is_empty() {
+                return b"-ERR empty array\r\n".to_vec();
+            }
+
+            let command = &elements[0];
+            match command {
+                RedisValueRef::String(bytes) => match &bytes[..] {
+                    b"PING" => b"+PONG\r\n".to_vec(),
+                    b"ECHO" => {
+                        if elements.len() < 2 {
+                            return b"-ERR wrong number of arguments for ECHO cmd \r\n".to_vec();
+                        }
+                        if let RedisValueRef::String(arg) = &elements[1] {
+                            format!("${}\r\n{}\r\n", arg.len(), String::from_utf8_lossy(arg))
+                                .into_bytes()
+                        } else {
+                            b"-ERR ECHO argument must be a string\r\n".to_vec()
+                        }
+                    }
+                    _ => todo!(),
+                },
+                _ => b"-ERR command must be a STRING\r\n".to_vec(),
+            }
+        }
         RedisValueRef::NullArray => {
             return b"+NULLARRAY\r\n".to_vec();
         }
