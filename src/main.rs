@@ -1,5 +1,6 @@
 #![allow(unused_imports)]
 use bytes::Bytes;
+use std::collections::VecDeque;
 use std::{io::ErrorKind, vec};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -39,29 +40,7 @@ async fn handle_connection(mut stream: TcpStream) {
         // si il existe un prochain mot
         match frame.next().await {
             Some(Ok(value)) => {
-                let response: &[u8] = match value {
-                    RedisValueRef::String(bytes) => match bytes == "PING" {
-                        true => b"PONG",
-                        false => todo!(),
-                    },
-                    RedisValueRef::Error(bytes) => todo!(),
-                    RedisValueRef::Int(_) => todo!(),
-                    RedisValueRef::Array(elements) => match &elements[0] {
-                        RedisValueRef::String(cmd) => match cmd == "PING" {
-                            true => b"PONG",
-                            false => todo!(),
-                        },
-                        RedisValueRef::Error(bytes) => todo!(),
-                        RedisValueRef::Int(_) => todo!(),
-                        RedisValueRef::Array(redis_value_refs) => todo!(),
-                        RedisValueRef::NullArray => todo!(),
-                        RedisValueRef::NullBulkString => todo!(),
-                        RedisValueRef::ErrorMsg(items) => todo!(),
-                    },
-                    RedisValueRef::NullArray => todo!(),
-                    RedisValueRef::NullBulkString => todo!(),
-                    RedisValueRef::ErrorMsg(items) => todo!(),
-                };
+                let response: &[u8] = &handle_command(value);
 
                 // envoyer la réponse
                 let result: Result<(), std::io::Error> = write_stream.write_all(response).await;
@@ -81,6 +60,29 @@ async fn handle_connection(mut stream: TcpStream) {
             None => {
                 return;
             }
+        }
+    }
+}
+
+fn handle_command(value: RedisValueRef) -> Vec<u8> {
+    match value {
+        RedisValueRef::String(bytes) => match *bytes == *b"PING" {
+            true => b"+PONG\r\n".to_vec(),
+            // faire un genre de switch ??
+            false => todo!(),
+        },
+        RedisValueRef::Error(bytes) => {
+            return b"+ERROR\r\n".to_vec();
+        }
+        RedisValueRef::Int(_) => {
+            return b"+INT\r\n".to_vec();
+        }
+        RedisValueRef::Array(mut elements) => return handle_command(elements.remove(0)),
+        RedisValueRef::NullArray => {
+            return b"+NULLARRAY\r\n".to_vec();
+        }
+        RedisValueRef::NullBulkString => {
+            return b"+NullBulkString\r\n".to_vec();
         }
     }
 }
