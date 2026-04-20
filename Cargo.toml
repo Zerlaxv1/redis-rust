@@ -10,4 +10,5 @@ bytes = "1.3.0"                                     # helps manage buffers
 memchr = "2.8.0"
 thiserror = "1.0.32"                                # error handling
 tokio = { version = "1.23.0", features = ["full"] } # async networking
+tokio-stream = "0.1.18"
 tokio-util = { version = "0.7.18", features = ["codec"] }
