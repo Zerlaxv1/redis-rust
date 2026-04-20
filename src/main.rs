@@ -96,6 +96,7 @@ fn handle_command(value: RedisValueRef) -> Vec<u8> {
                             b"-ERR ECHO argument must be a string\r\n".to_vec()
                         }
                     }
+                    b"SET" => b"test".to_vec(),
                     _ => todo!(),
                 },
                 _ => b"-ERR command must be a STRING\r\n".to_vec(),
