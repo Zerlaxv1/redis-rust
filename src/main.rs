@@ -1,6 +1,7 @@
 #![allow(unused_imports)]
 use bytes::Bytes;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
+use std::sync::{Arc, Mutex};
 use std::{io::ErrorKind, vec};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -18,17 +19,23 @@ async fn main() {
     // bind to :6379
     let listener: TcpListener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
 
+    let data: HashMap<String, String> = HashMap::new();
+    let arc: Arc<Mutex<HashMap<String, String>>> = Arc::new(data.into());
+
     // main loop
     loop {
         // accepte new incoming connections
         let (stream, _): (TcpStream, _) = listener.accept().await.unwrap();
+
+        let arc_clone = arc.clone();
+
         tokio::spawn(async move {
-            handle_connection(stream).await;
+            handle_connection(stream, arc_clone).await;
         });
     }
 }
 
-async fn handle_connection(mut stream: TcpStream) {
+async fn handle_connection(mut stream: TcpStream, arc: Arc<Mutex<HashMap<String, String>>>) {
     // diviser le stream en 2 partie, read et write pour le borrow checkekr
     let (read_stream, mut write_stream) = stream.split();
 
@@ -40,7 +47,7 @@ async fn handle_connection(mut stream: TcpStream) {
         // si il existe un prochain mot
         match frame.next().await {
             Some(Ok(value)) => {
-                let response: &[u8] = &handle_command(value);
+                let response: &[u8] = &handle_command(value, &arc);
 
                 // envoyer la réponse
                 let result: Result<(), std::io::Error> = write_stream.write_all(response).await;
@@ -64,7 +71,7 @@ async fn handle_connection(mut stream: TcpStream) {
     }
 }
 
-fn handle_command(value: RedisValueRef) -> Vec<u8> {
+fn handle_command(value: RedisValueRef, mut arc: &Arc<Mutex<HashMap<String, String>>>) -> Vec<u8> {
     match value {
         RedisValueRef::String(bytes) => match &bytes[..] {
             b"PING" => b"+PONG\r\n".to_vec(),
@@ -96,7 +103,23 @@ fn handle_command(value: RedisValueRef) -> Vec<u8> {
                             b"-ERR ECHO argument must be a string\r\n".to_vec()
                         }
                     }
-                    b"SET" => b"test".to_vec(),
+                    b"SET" => {
+                        if elements.len() != 3 {
+                            return b"-ERR wrong number of arguments for SET cmd \r\n".to_vec();
+                        }
+                        if let RedisValueRef::String(key) = &elements[1]
+                            && let RedisValueRef::String(value) = &elements[2]
+                        {
+                            let mut store = arc.lock().unwrap();
+                            let r = store.insert(
+                                String::from_utf8_lossy(key).to_string(),
+                                String::from_utf8_lossy(value).to_string(),
+                            );
+                            return b"-OK\r\n".to_vec();
+                        } else {
+                            b"-ERR SET argument must be a string\r\n".to_vec()
+                        }
+                    }
                     b"GET" => b"2".to_vec(),
                     _ => todo!(),
                 },
