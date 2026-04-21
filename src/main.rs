@@ -2,6 +2,7 @@
 use bytes::Bytes;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use std::{io::ErrorKind, vec};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -19,8 +20,8 @@ async fn main() {
     // bind to :6379
     let listener: TcpListener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
 
-    let data: HashMap<String, String> = HashMap::new();
-    let arc: Arc<Mutex<HashMap<String, String>>> = Arc::new(data.into());
+    let data: HashMap<String, (String, Option<Instant>)> = HashMap::new();
+    let arc: Arc<Mutex<HashMap<String, (String, Option<Instant>)>>> = Arc::new(data.into());
 
     // main loop
     loop {
@@ -35,7 +36,10 @@ async fn main() {
     }
 }
 
-async fn handle_connection(mut stream: TcpStream, arc: Arc<Mutex<HashMap<String, String>>>) {
+async fn handle_connection(
+    mut stream: TcpStream,
+    arc: Arc<Mutex<HashMap<String, (String, Option<Instant>)>>>,
+) {
     // diviser le stream en 2 partie, read et write pour le borrow checkekr
     let (read_stream, mut write_stream) = stream.split();
 
@@ -71,9 +75,12 @@ async fn handle_connection(mut stream: TcpStream, arc: Arc<Mutex<HashMap<String,
     }
 }
 
-fn handle_command(value: RedisValueRef, arc: &Arc<Mutex<HashMap<String, String>>>) -> Vec<u8> {
+fn handle_command(
+    value: RedisValueRef,
+    arc: &Arc<Mutex<HashMap<String, (String, Option<Instant>)>>>,
+) -> Vec<u8> {
     match value {
-        RedisValueRef::String(bytes) => match &bytes[..] {
+        RedisValueRef::String(bytes) => match &bytes.to_ascii_uppercase()[..] {
             b"PING" => b"+PONG\r\n".to_vec(),
             _ => todo!(),
         },
@@ -104,7 +111,39 @@ fn handle_command(value: RedisValueRef, arc: &Arc<Mutex<HashMap<String, String>>
                         }
                     }
                     b"SET" => {
-                        if elements.len() != 3 {
+                        let mut experity: Option<Instant> = None;
+
+                        if elements.len() == 5 {
+                            if let RedisValueRef::String(option) = &elements[3] {
+                                match &option.to_ascii_uppercase()[..] {
+                                    b"PX" => {
+                                        if let RedisValueRef::String(time) = &elements[4] {
+                                            let ms: u64 =
+                                                String::from_utf8_lossy(time).parse().unwrap();
+                                            experity =
+                                                Some(Instant::now() + Duration::from_millis(ms));
+                                        } else {
+                                            return b"-ERR wrong argument for PX".to_vec();
+                                        }
+                                    }
+                                    b"EX" => {
+                                        if let RedisValueRef::String(time) = &elements[4] {
+                                            let ms: u64 =
+                                                String::from_utf8_lossy(time).parse().unwrap();
+                                            experity =
+                                                Some(Instant::now() + Duration::from_secs(ms));
+                                        } else {
+                                            return b"-ERR wrong argument for EX".to_vec();
+                                        }
+                                    }
+                                    _ => {
+                                        return b"-ERR wrong timeout argument for SET".to_vec();
+                                    }
+                                }
+                            }
+                        }
+
+                        if elements.len() < 3 {
                             return b"-ERR wrong number of arguments for SET cmd \r\n".to_vec();
                         }
                         if let RedisValueRef::String(key) = &elements[1]
@@ -113,7 +152,7 @@ fn handle_command(value: RedisValueRef, arc: &Arc<Mutex<HashMap<String, String>>
                             let mut store = arc.lock().unwrap();
                             store.insert(
                                 String::from_utf8_lossy(key).to_string(),
-                                String::from_utf8_lossy(value).to_string(),
+                                (String::from_utf8_lossy(value).to_string(), experity),
                             );
                             return b"+OK\r\n".to_vec();
                         } else {
@@ -128,9 +167,18 @@ fn handle_command(value: RedisValueRef, arc: &Arc<Mutex<HashMap<String, String>>
                             let store = arc.lock().unwrap();
                             let r = store.get(&String::from_utf8_lossy(key).to_string());
                             match r {
-                                Some(result) => {
-                                    format!("${}\r\n{}\r\n", result.len(), result).into_bytes()
-                                }
+                                Some(result) => match result.1 {
+                                    Some(r) => {
+                                        if r < Instant::now() {
+                                            return b"$-1\r\n".to_vec();
+                                        } else {
+                                            format!("${}\r\n{}\r\n", result.0.len(), result.0)
+                                                .into_bytes()
+                                        }
+                                    }
+                                    None => format!("${}\r\n{}\r\n", result.0.len(), result.0)
+                                        .into_bytes(),
+                                },
                                 None => {
                                     return b"$-1\r\n".to_vec();
                                 }
