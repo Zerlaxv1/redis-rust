@@ -12,14 +12,19 @@ use crate::resp_parser::{RedisValueRef, RespParser};
 
 mod resp_parser;
 
-type Store = Arc<Mutex<HashMap<String, (String, Option<Instant>)>>>;
+enum RedisValue {
+    String(String, Option<Instant>),
+    List(Vec<String>),
+}
+
+type Store = Arc<Mutex<HashMap<String, RedisValue>>>;
 
 #[tokio::main]
 async fn main() {
     // bind to :6379
     let listener: TcpListener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
 
-    let data: HashMap<String, (String, Option<Instant>)> = HashMap::new();
+    let data: HashMap<String, RedisValue> = HashMap::new();
     let arc: Store = Arc::new(data.into());
 
     // main loop
@@ -160,10 +165,11 @@ fn cmd_set(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
         && let RedisValueRef::String(value) = &elements[2]
     {
         let mut store = arc.lock().unwrap();
-        store.insert(
-            String::from_utf8_lossy(key).to_string(),
-            (String::from_utf8_lossy(value).to_string(), experity),
-        );
+
+        let value: RedisValue =
+            RedisValue::String(String::from_utf8_lossy(value).to_string(), experity);
+
+        store.insert(String::from_utf8_lossy(key).to_string(), value);
         return resp_simple("OK");
     } else {
         return resp_error("SET argument must be a string");
@@ -176,18 +182,26 @@ fn cmd_get(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
     }
     if let RedisValueRef::String(key) = &elements[1] {
         let store = arc.lock().unwrap();
-        let r = store.get(&String::from_utf8_lossy(key).to_string());
+        let key_string = String::from_utf8_lossy(key).to_string();
+        let r = store.get(&key_string);
         match r {
-            Some(result) => match result.1 {
-                Some(r) => {
-                    if r < Instant::now() {
-                        return resp_null_bulk();
-                    } else {
-                        return resp_bulk(&result.0);
+            Some(result) => {
+                if let RedisValue::String(value, timeout) = result {
+                    match timeout {
+                        Some(timeout) => {
+                            if timeout < &Instant::now() {
+                                return resp_null_bulk();
+                            } else {
+                                return resp_bulk(&value);
+                            }
+                        }
+
+                        None => return resp_bulk(&value),
                     }
+                } else {
+                    return resp_error(&format!("{} is not a String", key_string));
                 }
-                None => return resp_bulk(&result.0),
-            },
+            }
             None => {
                 return resp_null_bulk();
             }
