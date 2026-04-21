@@ -101,6 +101,7 @@ fn handle_command(value: RedisValueRef, arc: &Store) -> Vec<u8> {
                     b"SET" => cmd_set(&elements, arc),
                     b"GET" => cmd_get(&elements, arc),
                     b"RPUSH" => cmd_rpush(&elements, arc),
+                    b"LRANGE" => cmd_lrange(&elements, arc),
                     _ => resp_error("command not supported"),
                 },
                 _ => resp_error("command must be a STRING"),
@@ -256,4 +257,8 @@ fn cmd_rpush(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
     } else {
         return resp_error("list argument is not a string for RPUSH");
     };
+}
+
+fn cmd_lrange(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
+    resp_error("not implemented")
 }
