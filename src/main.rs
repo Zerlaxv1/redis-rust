@@ -15,13 +15,15 @@ use crate::resp_parser::{RedisValueRef, RespParser};
 
 mod resp_parser;
 
+type Store = Arc<Mutex<HashMap<String, (String, Option<Instant>)>>>;
+
 #[tokio::main]
 async fn main() {
     // bind to :6379
     let listener: TcpListener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
 
     let data: HashMap<String, (String, Option<Instant>)> = HashMap::new();
-    let arc: Arc<Mutex<HashMap<String, (String, Option<Instant>)>>> = Arc::new(data.into());
+    let arc: Store = Arc::new(data.into());
 
     // main loop
     loop {
@@ -36,10 +38,7 @@ async fn main() {
     }
 }
 
-async fn handle_connection(
-    mut stream: TcpStream,
-    arc: Arc<Mutex<HashMap<String, (String, Option<Instant>)>>>,
-) {
+async fn handle_connection(mut stream: TcpStream, arc: Store) {
     // diviser le stream en 2 partie, read et write pour le borrow checkekr
     let (read_stream, mut write_stream) = stream.split();
 
@@ -75,14 +74,11 @@ async fn handle_connection(
     }
 }
 
-fn handle_command(
-    value: RedisValueRef,
-    arc: &Arc<Mutex<HashMap<String, (String, Option<Instant>)>>>,
-) -> Vec<u8> {
+fn handle_command(value: RedisValueRef, arc: &Store) -> Vec<u8> {
     match value {
         RedisValueRef::String(bytes) => match &bytes.to_ascii_uppercase()[..] {
-            b"PING" => b"+PONG\r\n".to_vec(),
-            _ => todo!(),
+            b"PING" => cmd_ping(),
+            _ => b"-ERR not implemented\r\n".to_vec(),
         },
         RedisValueRef::Error(_bytes) => {
             return b"+ERROR\r\n".to_vec();
@@ -98,96 +94,11 @@ fn handle_command(
             let command = &elements[0];
             match command {
                 RedisValueRef::String(bytes) => match &bytes.to_ascii_uppercase()[..] {
-                    b"PING" => b"+PONG\r\n".to_vec(),
-                    b"ECHO" => {
-                        if elements.len() < 2 {
-                            return b"-ERR wrong number of arguments for ECHO cmd \r\n".to_vec();
-                        }
-                        if let RedisValueRef::String(arg) = &elements[1] {
-                            format!("${}\r\n{}\r\n", arg.len(), String::from_utf8_lossy(arg))
-                                .into_bytes()
-                        } else {
-                            b"-ERR ECHO argument must be a string\r\n".to_vec()
-                        }
-                    }
-                    b"SET" => {
-                        let mut experity: Option<Instant> = None;
-
-                        if elements.len() == 5 {
-                            if let RedisValueRef::String(option) = &elements[3] {
-                                match &option.to_ascii_uppercase()[..] {
-                                    b"PX" => {
-                                        if let RedisValueRef::String(time) = &elements[4] {
-                                            let ms: u64 =
-                                                String::from_utf8_lossy(time).parse().unwrap();
-                                            experity =
-                                                Some(Instant::now() + Duration::from_millis(ms));
-                                        } else {
-                                            return b"-ERR wrong argument for PX".to_vec();
-                                        }
-                                    }
-                                    b"EX" => {
-                                        if let RedisValueRef::String(time) = &elements[4] {
-                                            let ms: u64 =
-                                                String::from_utf8_lossy(time).parse().unwrap();
-                                            experity =
-                                                Some(Instant::now() + Duration::from_secs(ms));
-                                        } else {
-                                            return b"-ERR wrong argument for EX".to_vec();
-                                        }
-                                    }
-                                    _ => {
-                                        return b"-ERR wrong timeout argument for SET".to_vec();
-                                    }
-                                }
-                            }
-                        }
-
-                        if elements.len() < 3 {
-                            return b"-ERR wrong number of arguments for SET cmd \r\n".to_vec();
-                        }
-                        if let RedisValueRef::String(key) = &elements[1]
-                            && let RedisValueRef::String(value) = &elements[2]
-                        {
-                            let mut store = arc.lock().unwrap();
-                            store.insert(
-                                String::from_utf8_lossy(key).to_string(),
-                                (String::from_utf8_lossy(value).to_string(), experity),
-                            );
-                            return b"+OK\r\n".to_vec();
-                        } else {
-                            b"-ERR SET argument must be a string\r\n".to_vec()
-                        }
-                    }
-                    b"GET" => {
-                        if elements.len() < 2 {
-                            return b"-ERR wrong number of arguments for GET cmd \r\n".to_vec();
-                        }
-                        if let RedisValueRef::String(key) = &elements[1] {
-                            let store = arc.lock().unwrap();
-                            let r = store.get(&String::from_utf8_lossy(key).to_string());
-                            match r {
-                                Some(result) => match result.1 {
-                                    Some(r) => {
-                                        if r < Instant::now() {
-                                            return b"$-1\r\n".to_vec();
-                                        } else {
-                                            format!("${}\r\n{}\r\n", result.0.len(), result.0)
-                                                .into_bytes()
-                                        }
-                                    }
-                                    None => format!("${}\r\n{}\r\n", result.0.len(), result.0)
-                                        .into_bytes(),
-                                },
-                                None => {
-                                    return b"$-1\r\n".to_vec();
-                                }
-                            }
-                        } else {
-                            b"-ERR GET argument must be a string\r\n".to_vec()
-                        }
-                    }
-                    _ => todo!(),
+                    b"PING" => cmd_ping(),
+                    b"ECHO" => cmd_echo(&elements),
+                    b"SET" => cmd_set(&elements, arc),
+                    b"GET" => cmd_get(&elements, arc),
+                    _ => b"-ERR command not supported".to_vec(),
                 },
                 _ => b"-ERR command must be a STRING\r\n".to_vec(),
             }
@@ -198,5 +109,93 @@ fn handle_command(
         RedisValueRef::NullBulkString => {
             return b"+NullBulkString\r\n".to_vec();
         }
+    }
+}
+
+fn cmd_ping() -> Vec<u8> {
+    b"+PONG\r\n".to_vec()
+}
+
+fn cmd_echo(elements: &[RedisValueRef]) -> Vec<u8> {
+    if elements.len() < 2 {
+        return b"-ERR wrong number of arguments for ECHO cmd \r\n".to_vec();
+    }
+    if let RedisValueRef::String(arg) = &elements[1] {
+        format!("${}\r\n{}\r\n", arg.len(), String::from_utf8_lossy(arg)).into_bytes()
+    } else {
+        b"-ERR ECHO argument must be a string\r\n".to_vec()
+    }
+}
+
+fn cmd_set(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
+    let mut experity: Option<Instant> = None;
+
+    if elements.len() == 5 {
+        if let RedisValueRef::String(option) = &elements[3] {
+            match &option.to_ascii_uppercase()[..] {
+                b"PX" => {
+                    if let RedisValueRef::String(time) = &elements[4] {
+                        let ms: u64 = String::from_utf8_lossy(time).parse().unwrap();
+                        experity = Some(Instant::now() + Duration::from_millis(ms));
+                    } else {
+                        return b"-ERR wrong argument for PX".to_vec();
+                    }
+                }
+                b"EX" => {
+                    if let RedisValueRef::String(time) = &elements[4] {
+                        let ms: u64 = String::from_utf8_lossy(time).parse().unwrap();
+                        experity = Some(Instant::now() + Duration::from_secs(ms));
+                    } else {
+                        return b"-ERR wrong argument for EX".to_vec();
+                    }
+                }
+                _ => {
+                    return b"-ERR wrong timeout argument for SET".to_vec();
+                }
+            }
+        }
+    }
+
+    if elements.len() < 3 {
+        return b"-ERR wrong number of arguments for SET cmd \r\n".to_vec();
+    }
+    if let RedisValueRef::String(key) = &elements[1]
+        && let RedisValueRef::String(value) = &elements[2]
+    {
+        let mut store = arc.lock().unwrap();
+        store.insert(
+            String::from_utf8_lossy(key).to_string(),
+            (String::from_utf8_lossy(value).to_string(), experity),
+        );
+        return b"+OK\r\n".to_vec();
+    } else {
+        b"-ERR SET argument must be a string\r\n".to_vec()
+    }
+}
+
+fn cmd_get(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
+    if elements.len() < 2 {
+        return b"-ERR wrong number of arguments for GET cmd \r\n".to_vec();
+    }
+    if let RedisValueRef::String(key) = &elements[1] {
+        let store = arc.lock().unwrap();
+        let r = store.get(&String::from_utf8_lossy(key).to_string());
+        match r {
+            Some(result) => match result.1 {
+                Some(r) => {
+                    if r < Instant::now() {
+                        return b"$-1\r\n".to_vec();
+                    } else {
+                        format!("${}\r\n{}\r\n", result.0.len(), result.0).into_bytes()
+                    }
+                }
+                None => format!("${}\r\n{}\r\n", result.0.len(), result.0).into_bytes(),
+            },
+            None => {
+                return b"$-1\r\n".to_vec();
+            }
+        }
+    } else {
+        b"-ERR GET argument must be a string\r\n".to_vec()
     }
 }
