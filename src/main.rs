@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::btree_map::Keys;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::{
@@ -100,6 +101,7 @@ fn handle_command(value: RedisValueRef, arc: &Store) -> Vec<u8> {
                     b"ECHO" => cmd_echo(&elements),
                     b"SET" => cmd_set(&elements, arc),
                     b"GET" => cmd_get(&elements, arc),
+                    b"RPUSH" => cmd_rpush(&elements, arc),
                     _ => resp_error("command not supported"),
                 },
                 _ => resp_error("command must be a STRING"),
@@ -225,4 +227,33 @@ fn resp_bulk(s: &str) -> Vec<u8> {
 
 fn resp_null_bulk() -> Vec<u8> {
     b"$-1\r\n".to_vec()
+}
+
+fn resp_int(i: usize) -> Vec<u8> {
+    format!(":{}\r\n", i).into_bytes()
+}
+
+fn cmd_rpush(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
+    if elements.len() != 3 {
+        return resp_error("wront arguments for RPUSH");
+    }
+    if let RedisValueRef::String(key) = &elements[1]
+        && let RedisValueRef::String(value) = &elements[2]
+    {
+        let mut store = arc.lock().unwrap();
+
+        let key_string = String::from_utf8_lossy(key).to_string();
+        let value_string = String::from_utf8_lossy(value).to_string();
+
+        let entry = store.entry(key_string).or_insert(RedisValue::List(vec![]));
+        match entry {
+            RedisValue::List(liste) => {
+                liste.push(value_string);
+                return resp_int(liste.len());
+            }
+            _ => return resp_error("not a list"),
+        }
+    } else {
+        return resp_error("wrong arguments for RPUSH");
+    };
 }
