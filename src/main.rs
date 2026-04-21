@@ -184,15 +184,15 @@ fn cmd_get(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
             Some(result) => match result.1 {
                 Some(r) => {
                     if r < Instant::now() {
-                        return b"$-1\r\n".to_vec();
+                        return resp_null_bulk();
                     } else {
-                        format!("${}\r\n{}\r\n", result.0.len(), result.0).into_bytes()
+                        return resp_bulk(&result.0);
                     }
                 }
-                None => format!("${}\r\n{}\r\n", result.0.len(), result.0).into_bytes(),
+                None => return resp_bulk(&result.0),
             },
             None => {
-                return b"$-1\r\n".to_vec();
+                return resp_null_bulk();
             }
         }
     } else {
