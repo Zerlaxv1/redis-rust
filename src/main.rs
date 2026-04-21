@@ -1,14 +1,11 @@
-#![allow(unused_imports)]
-use bytes::Bytes;
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use std::{io::ErrorKind, vec};
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::AsyncWriteExt,
     net::{TcpListener, TcpStream},
 };
-use tokio_stream::{Stream, StreamExt};
+use tokio_stream::StreamExt;
 use tokio_util::codec::FramedRead;
 
 use crate::resp_parser::{RedisValueRef, RespParser};
