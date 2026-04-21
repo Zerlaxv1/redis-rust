@@ -78,17 +78,17 @@ fn handle_command(value: RedisValueRef, arc: &Store) -> Vec<u8> {
     match value {
         RedisValueRef::String(bytes) => match &bytes.to_ascii_uppercase()[..] {
             b"PING" => cmd_ping(),
-            _ => b"-ERR not implemented\r\n".to_vec(),
+            _ => resp_error("not implemented"),
         },
         RedisValueRef::Error(_bytes) => {
-            return b"+ERROR\r\n".to_vec();
+            return resp_error("ERROR not implemented");
         }
         RedisValueRef::Int(_) => {
-            return b"+INT\r\n".to_vec();
+            return resp_error("INT not implemented");
         }
         RedisValueRef::Array(elements) => {
             if elements.is_empty() {
-                return b"-ERR empty array\r\n".to_vec();
+                return resp_error("empty array");
             }
 
             let command = &elements[0];
@@ -98,32 +98,32 @@ fn handle_command(value: RedisValueRef, arc: &Store) -> Vec<u8> {
                     b"ECHO" => cmd_echo(&elements),
                     b"SET" => cmd_set(&elements, arc),
                     b"GET" => cmd_get(&elements, arc),
-                    _ => b"-ERR command not supported".to_vec(),
+                    _ => resp_error("command not supported"),
                 },
-                _ => b"-ERR command must be a STRING\r\n".to_vec(),
+                _ => resp_error("command must be a STRING"),
             }
         }
         RedisValueRef::NullArray => {
-            return b"+NULLARRAY\r\n".to_vec();
+            return resp_error("NULLARRAY not implemented");
         }
         RedisValueRef::NullBulkString => {
-            return b"+NullBulkString\r\n".to_vec();
+            return resp_error("NullBulkString not implemented");
         }
     }
 }
 
 fn cmd_ping() -> Vec<u8> {
-    b"+PONG\r\n".to_vec()
+    return resp_simple("PONG");
 }
 
 fn cmd_echo(elements: &[RedisValueRef]) -> Vec<u8> {
     if elements.len() < 2 {
-        return b"-ERR wrong number of arguments for ECHO cmd \r\n".to_vec();
+        return resp_error("wrong number of arguments for ECHO cmd");
     }
     if let RedisValueRef::String(arg) = &elements[1] {
-        format!("${}\r\n{}\r\n", arg.len(), String::from_utf8_lossy(arg)).into_bytes()
+        return resp_bulk(&String::from_utf8_lossy(arg).to_string());
     } else {
-        b"-ERR ECHO argument must be a string\r\n".to_vec()
+        return resp_error("ECHO argument must be a string");
     }
 }
 
@@ -198,4 +198,20 @@ fn cmd_get(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
     } else {
         b"-ERR GET argument must be a string\r\n".to_vec()
     }
+}
+
+fn resp_error(msg: &str) -> Vec<u8> {
+    format!("-ERR {}\r\n", msg).into_bytes()
+}
+
+fn resp_simple(msg: &str) -> Vec<u8> {
+    format!("+{}\r\n", msg).into_bytes()
+}
+
+fn resp_bulk(s: &str) -> Vec<u8> {
+    format!("${}\r\n{}\r\n", s.len(), s).into_bytes()
+}
+
+fn resp_null_bulk() -> Vec<u8> {
+    b"$-1\r\n".to_vec()
 }
