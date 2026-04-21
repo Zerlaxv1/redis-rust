@@ -138,7 +138,7 @@ fn cmd_set(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
                         let ms: u64 = String::from_utf8_lossy(time).parse().unwrap();
                         experity = Some(Instant::now() + Duration::from_millis(ms));
                     } else {
-                        return b"-ERR wrong argument for PX".to_vec();
+                        return resp_error("wrong argument for PX");
                     }
                 }
                 b"EX" => {
@@ -146,18 +146,18 @@ fn cmd_set(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
                         let ms: u64 = String::from_utf8_lossy(time).parse().unwrap();
                         experity = Some(Instant::now() + Duration::from_secs(ms));
                     } else {
-                        return b"-ERR wrong argument for EX".to_vec();
+                        return resp_error("wrong argument for EX");
                     }
                 }
                 _ => {
-                    return b"-ERR wrong timeout argument for SET".to_vec();
+                    return resp_error("wrong timeout argument for SET");
                 }
             }
         }
     }
 
     if elements.len() < 3 {
-        return b"-ERR wrong number of arguments for SET cmd \r\n".to_vec();
+        return resp_error("wrong number of arguments for SET cmd");
     }
     if let RedisValueRef::String(key) = &elements[1]
         && let RedisValueRef::String(value) = &elements[2]
@@ -167,15 +167,15 @@ fn cmd_set(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
             String::from_utf8_lossy(key).to_string(),
             (String::from_utf8_lossy(value).to_string(), experity),
         );
-        return b"+OK\r\n".to_vec();
+        return resp_simple("OK");
     } else {
-        b"-ERR SET argument must be a string\r\n".to_vec()
+        return resp_error("SET argument must be a string");
     }
 }
 
 fn cmd_get(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
     if elements.len() < 2 {
-        return b"-ERR wrong number of arguments for GET cmd \r\n".to_vec();
+        return resp_error("wrong number of arguments for GET cmd");
     }
     if let RedisValueRef::String(key) = &elements[1] {
         let store = arc.lock().unwrap();
@@ -196,7 +196,7 @@ fn cmd_get(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
             }
         }
     } else {
-        b"-ERR GET argument must be a string\r\n".to_vec()
+        return resp_error("GET argument must be a string");
     }
 }
 
