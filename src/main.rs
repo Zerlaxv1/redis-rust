@@ -285,7 +285,7 @@ fn cmd_lrange(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
         && let RedisValueRef::String(start) = &elements[2]
         && let RedisValueRef::String(end) = &elements[3]
     {
-        let mut store = arc.lock().unwrap();
+        let store = arc.lock().unwrap();
         let key_string = String::from_utf8_lossy(liste).to_string();
 
         let start: usize = String::from_utf8_lossy(start).parse().unwrap();
@@ -296,9 +296,16 @@ fn cmd_lrange(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
         match entry {
             Some(liste) => {
                 if let RedisValue::List(liste) = liste {
+                    if start >= liste.len() || start > end {
+                        return resp_array(&[]);
+                    }
+
+                    if end >= liste.len() {
+                        return resp_array(&liste[start..=liste.len()]);
+                    }
                     return resp_array(&liste[start..=end]);
                 } else {
-                    return resp_error("not a list")
+                    return resp_error("not a list");
                 }
             }
             None => return resp_array(&[]),
