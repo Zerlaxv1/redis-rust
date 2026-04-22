@@ -293,19 +293,18 @@ fn cmd_lrange(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
         match entry {
             Some(liste) => {
                 if let RedisValue::List(liste) = liste {
-                    let start: usize = if String::from_utf8_lossy(start).parse::<i32>().unwrap()
-                        < 0i32
-                    {
-                        liste.len() + String::from_utf8_lossy(start).parse::<usize>().unwrap() + 1
+                    let start_i: i32 = String::from_utf8_lossy(start).parse().unwrap();
+                    let start: usize = if start_i < 0i32 {
+                        (liste.len() as i32 + start_i + 1).max(0) as usize
                     } else {
-                        String::from_utf8_lossy(start).parse::<usize>().unwrap()
+                        (start_i + 1).min(liste.len() as i32) as usize
                     };
 
-                    let end: usize = if String::from_utf8_lossy(end).parse::<i32>().unwrap() < 0i32
-                    {
-                        liste.len() + String::from_utf8_lossy(end).parse::<usize>().unwrap() + 1
+                    let end_i: i32 = String::from_utf8_lossy(end).parse().unwrap();
+                    let end: usize = if end_i < 0i32 {
+                        (liste.len() as i32 + end_i + 1).max(0) as usize
                     } else {
-                        String::from_utf8_lossy(end).parse::<usize>().unwrap()
+                        (end_i + 1).min(liste.len() as i32) as usize
                     };
 
                     if start >= liste.len() || start > end {
