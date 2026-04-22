@@ -233,9 +233,26 @@ fn resp_int(i: usize) -> Vec<u8> {
     format!(":{}\r\n", i).into_bytes()
 }
 
+fn resp_array(array: &[String]) -> Vec<u8> {
+    // exemple : ["a", "b", "c"]
+    //
+    //*3\r\n
+    // $1\r\n
+    // a\r\n
+    // $1\r\n
+    // b\r\n
+    // $1\r\n
+    // c\r\n
+    let mut result = format!("*{}\r\n", array.len()).into_bytes();
+    for s in array {
+        result.extend(resp_bulk(s));
+    }
+    result
+}
+
 fn cmd_rpush(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
     if elements.len() < 3 {
-        return resp_error("wront arguments for RPUSH");
+        return resp_error("wrong arguments for RPUSH");
     }
     if let RedisValueRef::String(key) = &elements[1] {
         let mut store = arc.lock().unwrap();
@@ -260,5 +277,33 @@ fn cmd_rpush(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
 }
 
 fn cmd_lrange(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
-    resp_error("not implemented")
+    if elements.len() != 4 {
+        return resp_error("wrong number of arguments for LRANGE");
+    }
+
+    if let RedisValueRef::String(liste) = &elements[1]
+        && let RedisValueRef::String(start) = &elements[2]
+        && let RedisValueRef::String(end) = &elements[3]
+    {
+        let mut store = arc.lock().unwrap();
+        let key_string = String::from_utf8_lossy(liste).to_string();
+
+        let start: usize = String::from_utf8_lossy(start).parse().unwrap();
+        let end: usize = String::from_utf8_lossy(end).parse().unwrap();
+
+        let entry = store.get(&key_string);
+
+        match entry {
+            Some(liste) => {
+                if let RedisValue::List(liste) = liste {
+                    return resp_array(&liste[start..=end]);
+                } else {
+                    return resp_error("not a list")
+                }
+            }
+            None => return resp_array(&[]),
+        }
+    } else {
+        return resp_error("arguments are not strings");
+    }
 }
