@@ -301,7 +301,7 @@ fn cmd_lrange(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
                     }
 
                     if end >= liste.len() {
-                        return resp_array(&liste[start..=liste.len()]);
+                        return resp_array(&liste[start..liste.len()]);
                     }
                     return resp_array(&liste[start..=end]);
                 } else {
