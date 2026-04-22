@@ -252,32 +252,14 @@ fn resp_array(array: &[String]) -> Vec<u8> {
 }
 
 fn cmd_rpush(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
-    if elements.len() < 3 {
-        return resp_error("wrong arguments for RPUSH");
-    }
-    if let RedisValueRef::String(key) = &elements[1] {
-        let mut store = arc.lock().unwrap();
-        let key_string = String::from_utf8_lossy(key).to_string();
-
-        let entry = store.entry(key_string).or_insert(RedisValue::List(vec![]));
-
-        match entry {
-            RedisValue::List(liste) => {
-                for value in &elements[2..] {
-                    if let RedisValueRef::String(v) = value {
-                        liste.push(String::from_utf8_lossy(v).to_string());
-                    }
-                }
-                return resp_int(liste.len());
-            }
-            _ => return resp_error("not a list"),
-        }
-    } else {
-        return resp_error("list argument is not a string for RPUSH");
-    };
+    push(elements, arc, false)
 }
 
 fn cmd_lpush(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
+    push(elements, arc, true)
+}
+
+fn push(elements: &[RedisValueRef], arc: &Store, front: bool) -> Vec<u8> {
     if elements.len() < 3 {
         return resp_error("wrong arguments for RPUSH");
     }
@@ -291,7 +273,11 @@ fn cmd_lpush(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
             RedisValue::List(liste) => {
                 for value in &elements[2..] {
                     if let RedisValueRef::String(v) = value {
-                        liste.insert(0, String::from_utf8_lossy(v).to_string());
+                        if front {
+                            liste.insert(0, String::from_utf8_lossy(v).to_string());
+                        } else {
+                            liste.push(String::from_utf8_lossy(v).to_string());
+                        }
                     }
                 }
                 return resp_int(liste.len());
