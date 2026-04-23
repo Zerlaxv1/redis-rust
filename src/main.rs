@@ -103,6 +103,7 @@ fn handle_command(value: RedisValueRef, arc: &Store) -> Vec<u8> {
                     b"RPUSH" => cmd_rpush(&elements, arc),
                     b"LPUSH" => cmd_lpush(&elements, arc),
                     b"LRANGE" => cmd_lrange(&elements, arc),
+                    b"LLEN" => cmd_llen(&elements, arc),
                     _ => resp_error("command not supported"),
                 },
                 _ => resp_error("command must be a STRING"),
@@ -336,5 +337,30 @@ fn resolve_index(i: i32, len: usize) -> usize {
         (len as i32 + i).max(0) as usize
     } else {
         (i as usize).min(len)
+    }
+}
+
+fn cmd_llen(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
+    if elements.len() != 2 {
+        return resp_error("wrong number of arguments for LLEN");
+    }
+    if let RedisValueRef::String(liste) = &elements[1] {
+        let store = arc.lock().unwrap();
+        let liste = store.get(&String::from_utf8_lossy(liste).to_string());
+
+        match liste {
+            Some(liste) => {
+                if let RedisValue::List(liste) = liste {
+                    return resp_int(liste.len());
+                } else {
+                    return resp_error("not a Liste");
+                }
+            }
+            None => {
+                return resp_int(0);
+            }
+        }
+    } else {
+        return resp_error("not a String");
     }
 }
