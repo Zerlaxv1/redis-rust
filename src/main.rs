@@ -375,7 +375,7 @@ fn cmd_lpop(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
         let mut store = arc.lock().unwrap();
         let liste = store.get_mut(&String::from_utf8_lossy(liste).to_string());
 
-        if elements.len() == 2 {
+        if elements.len() == 3 {
             if let RedisValueRef::String(number) = &elements[2] {
                 match liste {
                     Some(liste) => {
