@@ -1,3 +1,4 @@
+use core::num;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -367,24 +368,45 @@ fn cmd_llen(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
 }
 
 fn cmd_lpop(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
-    if elements.len() != 2 {
+    if elements.len() < 2 || elements.len() > 3 {
         return resp_error("wrong number of arguments for LPOP");
     }
     if let RedisValueRef::String(liste) = &elements[1] {
         let mut store = arc.lock().unwrap();
-        let liste = store.get_mut(& String::from_utf8_lossy(liste).to_string());
+        let liste = store.get_mut(&String::from_utf8_lossy(liste).to_string());
 
-        match liste {
-            Some(liste) => {
-                if let RedisValue::List(liste) = liste {
-                    let removed = liste.remove(0);
-                    return resp_bulk(&removed);
-                } else {
+        if elements.len() == 2 {
+            if let RedisValueRef::String(number) = &elements[2] {
+                match liste {
+                    Some(liste) => {
+                        if let RedisValue::List(liste) = liste {
+                            let number: usize = String::from_utf8_lossy(number).parse().unwrap();
+                            let removed: Vec<String> = liste.drain(0..number.min(liste.len())).collect();
+                            return resp_array(&removed);
+                        } else {
+                            return resp_null_bulk();
+                        }
+                    }
+                    None => {
+                        return resp_null_bulk();
+                    }
+                }
+            } else {
+                return resp_error("arg 2 is not a string");
+            }
+        } else {
+            match liste {
+                Some(liste) => {
+                    if let RedisValue::List(liste) = liste {
+                        let removed = liste.remove(0);
+                        return resp_bulk(&removed);
+                    } else {
+                        return resp_null_bulk();
+                    }
+                }
+                None => {
                     return resp_null_bulk();
                 }
-            }
-            None => {
-                return resp_null_bulk();
             }
         }
     } else {
