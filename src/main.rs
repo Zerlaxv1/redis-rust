@@ -1,7 +1,7 @@
-use core::num;
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::collections::{HashMap, VecDeque};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tokio::sync::{Mutex, oneshot};
 use tokio::{
     io::AsyncWriteExt,
     net::{TcpListener, TcpStream},
@@ -18,7 +18,12 @@ enum RedisValue {
     List(Vec<String>),
 }
 
-type Store = Arc<Mutex<HashMap<String, RedisValue>>>;
+struct Server {
+    data: HashMap<String, RedisValue>,
+    waiters: HashMap<String, VecDeque<oneshot::Sender<String>>>,
+}
+
+type Store = Arc<Mutex<Server>>;
 
 #[tokio::main]
 async fn main() {
@@ -26,7 +31,9 @@ async fn main() {
     let listener: TcpListener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
 
     let data: HashMap<String, RedisValue> = HashMap::new();
-    let arc: Store = Arc::new(data.into());
+    let waiters: HashMap<String, VecDeque<oneshot::Sender<String>>> = HashMap::new();
+    let server: Server = Server { data, waiters };
+    let arc: Store = Arc::new(Mutex::new(server));
 
     // main loop
     loop {
@@ -53,7 +60,7 @@ async fn handle_connection(mut stream: TcpStream, arc: Store) {
         // si il existe un prochain mot
         match frame.next().await {
             Some(Ok(value)) => {
-                let response: &[u8] = &handle_command(value, &arc);
+                let response: &[u8] = &handle_command(value, &arc).await;
 
                 // envoyer la réponse
                 let result: Result<(), std::io::Error> = write_stream.write_all(response).await;
@@ -77,7 +84,7 @@ async fn handle_connection(mut stream: TcpStream, arc: Store) {
     }
 }
 
-fn handle_command(value: RedisValueRef, arc: &Store) -> Vec<u8> {
+async fn handle_command(value: RedisValueRef, arc: &Store) -> Vec<u8> {
     match value {
         RedisValueRef::String(bytes) => match &bytes.to_ascii_uppercase()[..] {
             b"PING" => cmd_ping(),
@@ -99,13 +106,14 @@ fn handle_command(value: RedisValueRef, arc: &Store) -> Vec<u8> {
                 RedisValueRef::String(bytes) => match &bytes.to_ascii_uppercase()[..] {
                     b"PING" => cmd_ping(),
                     b"ECHO" => cmd_echo(&elements),
-                    b"SET" => cmd_set(&elements, arc),
-                    b"GET" => cmd_get(&elements, arc),
-                    b"RPUSH" => cmd_rpush(&elements, arc),
-                    b"LPUSH" => cmd_lpush(&elements, arc),
-                    b"LRANGE" => cmd_lrange(&elements, arc),
-                    b"LLEN" => cmd_llen(&elements, arc),
-                    b"LPOP" => cmd_lpop(&elements, arc),
+                    b"SET" => cmd_set(&elements, arc).await,
+                    b"GET" => cmd_get(&elements, arc).await,
+                    b"RPUSH" => cmd_rpush(&elements, arc).await,
+                    b"LPUSH" => cmd_lpush(&elements, arc).await,
+                    b"LRANGE" => cmd_lrange(&elements, arc).await,
+                    b"LLEN" => cmd_llen(&elements, arc).await,
+                    b"LPOP" => cmd_lpop(&elements, arc).await,
+                    b"BLPOP" => cmd_blpop(&elements, arc).await,
                     _ => resp_error("command not supported"),
                 },
                 _ => resp_error("command must be a STRING"),
@@ -135,7 +143,7 @@ fn cmd_echo(elements: &[RedisValueRef]) -> Vec<u8> {
     }
 }
 
-fn cmd_set(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
+async fn cmd_set(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
     let mut experity: Option<Instant> = None;
 
     if elements.len() == 5 {
@@ -170,26 +178,28 @@ fn cmd_set(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
     if let RedisValueRef::String(key) = &elements[1]
         && let RedisValueRef::String(value) = &elements[2]
     {
-        let mut store = arc.lock().unwrap();
+        let mut store = arc.lock().await;
 
         let value: RedisValue =
             RedisValue::String(String::from_utf8_lossy(value).to_string(), experity);
 
-        store.insert(String::from_utf8_lossy(key).to_string(), value);
+        store
+            .data
+            .insert(String::from_utf8_lossy(key).to_string(), value);
         return resp_simple("OK");
     } else {
         return resp_error("SET argument must be a string");
     }
 }
 
-fn cmd_get(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
+async fn cmd_get(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
     if elements.len() < 2 {
         return resp_error("wrong number of arguments for GET cmd");
     }
     if let RedisValueRef::String(key) = &elements[1] {
-        let store = arc.lock().unwrap();
+        let store = arc.lock().await;
         let key_string = String::from_utf8_lossy(key).to_string();
-        let r = store.get(&key_string);
+        let r = store.data.get(&key_string);
         match r {
             Some(result) => {
                 if let RedisValue::String(value, timeout) = result {
@@ -233,6 +243,10 @@ fn resp_null_bulk() -> Vec<u8> {
     b"$-1\r\n".to_vec()
 }
 
+fn resp_null_array() -> Vec<u8> {
+    b"*-1\r\n".to_vec()
+}
+
 fn resp_int(i: usize) -> Vec<u8> {
     format!(":{}\r\n", i).into_bytes()
 }
@@ -254,23 +268,26 @@ fn resp_array(array: &[String]) -> Vec<u8> {
     result
 }
 
-fn cmd_rpush(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
-    push(elements, arc, false)
+async fn cmd_rpush(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
+    push(elements, arc, false).await
 }
 
-fn cmd_lpush(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
-    push(elements, arc, true)
+async fn cmd_lpush(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
+    push(elements, arc, true).await
 }
 
-fn push(elements: &[RedisValueRef], arc: &Store, front: bool) -> Vec<u8> {
+async fn push(elements: &[RedisValueRef], arc: &Store, front: bool) -> Vec<u8> {
     if elements.len() < 3 {
         return resp_error("wrong arguments for RPUSH");
     }
     if let RedisValueRef::String(key) = &elements[1] {
-        let mut store = arc.lock().unwrap();
+        let mut store = arc.lock().await;
         let key_string = String::from_utf8_lossy(key).to_string();
 
-        let entry = store.entry(key_string).or_insert(RedisValue::List(vec![]));
+        let entry = store
+            .data
+            .entry(key_string)
+            .or_insert(RedisValue::List(vec![]));
 
         match entry {
             RedisValue::List(liste) => {
@@ -292,7 +309,7 @@ fn push(elements: &[RedisValueRef], arc: &Store, front: bool) -> Vec<u8> {
     };
 }
 
-fn cmd_lrange(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
+async fn cmd_lrange(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
     if elements.len() != 4 {
         return resp_error("wrong number of arguments for LRANGE");
     }
@@ -301,10 +318,10 @@ fn cmd_lrange(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
         && let RedisValueRef::String(start) = &elements[2]
         && let RedisValueRef::String(end) = &elements[3]
     {
-        let store = arc.lock().unwrap();
+        let store = arc.lock().await;
         let key_string = String::from_utf8_lossy(liste).to_string();
 
-        let entry = store.get(&key_string);
+        let entry = store.data.get(&key_string);
 
         match entry {
             Some(liste) => {
@@ -342,13 +359,13 @@ fn resolve_index(i: i32, len: usize) -> usize {
     }
 }
 
-fn cmd_llen(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
+async fn cmd_llen(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
     if elements.len() != 2 {
         return resp_error("wrong number of arguments for LLEN");
     }
     if let RedisValueRef::String(liste) = &elements[1] {
-        let store = arc.lock().unwrap();
-        let liste = store.get(&String::from_utf8_lossy(liste).to_string());
+        let store = arc.lock().await;
+        let liste = store.data.get(&String::from_utf8_lossy(liste).to_string());
 
         match liste {
             Some(liste) => {
@@ -367,13 +384,15 @@ fn cmd_llen(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
     }
 }
 
-fn cmd_lpop(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
+async fn cmd_lpop(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
     if elements.len() < 2 || elements.len() > 3 {
         return resp_error("wrong number of arguments for LPOP");
     }
     if let RedisValueRef::String(liste) = &elements[1] {
-        let mut store = arc.lock().unwrap();
-        let liste = store.get_mut(&String::from_utf8_lossy(liste).to_string());
+        let mut store = arc.lock().await;
+        let liste = store
+            .data
+            .get_mut(&String::from_utf8_lossy(liste).to_string());
 
         if elements.len() == 3 {
             if let RedisValueRef::String(number) = &elements[2] {
@@ -381,7 +400,8 @@ fn cmd_lpop(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
                     Some(liste) => {
                         if let RedisValue::List(liste) = liste {
                             let number: usize = String::from_utf8_lossy(number).parse().unwrap();
-                            let removed: Vec<String> = liste.drain(0..number.min(liste.len())).collect();
+                            let removed: Vec<String> =
+                                liste.drain(0..number.min(liste.len())).collect();
                             return resp_array(&removed);
                         } else {
                             return resp_null_bulk();
@@ -411,5 +431,57 @@ fn cmd_lpop(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
         }
     } else {
         return resp_error("arg 1 is not a string");
+    }
+}
+
+async fn cmd_blpop(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
+    if elements.len() != 3 {
+        return resp_error("wrong number of arguments for BLPOP");
+    }
+    if let RedisValueRef::String(liste) = &elements[1]
+        && let RedisValueRef::String(timeout) = &elements[2]
+    {
+        let mut store = arc.lock().await;
+
+        let liste_string = String::from_utf8_lossy(&liste).to_string();
+        let liste = store.data.get_mut(&liste_string);
+
+        match liste {
+            Some(liste) => {
+                if let RedisValue::List(liste) = liste {
+                    let removed = liste.remove(0);
+                    return resp_array(&[liste_string, removed]);
+                } else {
+                    return resp_null_bulk();
+                }
+            }
+            None => {
+                let (tx, rx) = oneshot::channel();
+
+                let timeout_secs: u64 = String::from_utf8_lossy(timeout).parse().unwrap();
+
+                store
+                    .waiters
+                    .entry(liste_string.clone())
+                    .or_insert(VecDeque::new())
+                    .push_back(tx);
+
+                drop(store);
+
+                if timeout_secs == 0 {
+                    match rx.await {
+                        Ok(value) => resp_array(&[liste_string, value]),
+                        Err(_) => resp_null_array(),
+                    }
+                } else {
+                    match tokio::time::timeout(Duration::from_secs(timeout_secs), rx).await {
+                        Ok(Ok(value)) => resp_array(&[liste_string, value]),
+                        _ => resp_null_array(),
+                    }
+                }
+            }
+        }
+    } else {
+        resp_error("not a string")
     }
 }
