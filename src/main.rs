@@ -104,6 +104,7 @@ fn handle_command(value: RedisValueRef, arc: &Store) -> Vec<u8> {
                     b"LPUSH" => cmd_lpush(&elements, arc),
                     b"LRANGE" => cmd_lrange(&elements, arc),
                     b"LLEN" => cmd_llen(&elements, arc),
+                    b"LPOP" => cmd_lpop(&elements, arc),
                     _ => resp_error("command not supported"),
                 },
                 _ => resp_error("command must be a STRING"),
@@ -362,5 +363,31 @@ fn cmd_llen(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
         }
     } else {
         return resp_error("not a String");
+    }
+}
+
+fn cmd_lpop(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
+    if elements.len() != 2 {
+        return resp_error("wrong number of arguments for LPOP");
+    }
+    if let RedisValueRef::String(liste) = &elements[1] {
+        let mut store = arc.lock().unwrap();
+        let liste = store.get_mut(& String::from_utf8_lossy(liste).to_string());
+
+        match liste {
+            Some(liste) => {
+                if let RedisValue::List(liste) = liste {
+                    let removed = liste.remove(0);
+                    return resp_bulk(&removed);
+                } else {
+                    return resp_null_bulk();
+                }
+            }
+            None => {
+                return resp_null_bulk();
+            }
+        }
+    } else {
+        return resp_error("arg 1 is not a string");
     }
 }
