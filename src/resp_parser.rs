@@ -1,9 +1,8 @@
 use bytes::{Bytes, BytesMut};
 use memchr::memchr;
 use std::convert::From;
-use std::io;
 use std::str;
-use tokio_util::codec::{Decoder, Encoder};
+use tokio_util::codec::Decoder;
 
 // Doc:
 // https://redis.io/docs/latest/develop/reference/protocol-spec/#arrays
@@ -21,9 +20,7 @@ struct BufSplit(usize, usize);
 
 type RedisResult = Result<Option<(usize, RedisBufSplit)>, RESPError>;
 
-
 //// Enums ////
-
 
 /// RedisValueRef is the canonical type for values flowing
 /// through the system. Inputs are converted into RedisValues,
@@ -58,9 +55,7 @@ enum RedisBufSplit {
     NullBulkString,
 }
 
-
 //// Implementations ////
-
 
 // First, we need a convenient way to convert our index pairs into byte slices.
 impl BufSplit {
