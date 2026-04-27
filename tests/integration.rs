@@ -1,8 +1,15 @@
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::process::{Child, Command};
+use std::sync::atomic::{AtomicU16, Ordering};
 use std::thread;
 use std::time::Duration;
+
+static PORT_COUNTER: AtomicU16 = AtomicU16::new(16380);
+
+fn next_port() -> u16 {
+    PORT_COUNTER.fetch_add(1, Ordering::SeqCst)
+}
 
 fn resp_encode(args: &[&str]) -> Vec<u8> {
     let mut buf = format!("*{}\r\n", args.len()).into_bytes();
@@ -24,9 +31,10 @@ fn send_resp(stream: &mut TcpStream, args: &[&str]) -> String {
     String::from_utf8_lossy(&buf[..n]).to_string()
 }
 
-fn start_server() -> Child {
+fn start_server_on(port: u16) -> Child {
+    let addr = format!("127.0.0.1:{}", port);
     let child = Command::new("cargo")
-        .args(["run", "--release", "--quiet"])
+        .args(["run", "--release", "--quiet", "--", &addr])
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .spawn()
         .expect("failed to start server");
@@ -35,8 +43,9 @@ fn start_server() -> Child {
     child
 }
 
-fn connect() -> TcpStream {
-    let stream = TcpStream::connect("127.0.0.1:6379").expect("failed to connect");
+fn connect_to(port: u16) -> TcpStream {
+    let addr = format!("127.0.0.1:{}", port);
+    let stream = TcpStream::connect(&addr).expect("failed to connect");
     stream
         .set_read_timeout(Some(Duration::from_secs(2)))
         .unwrap();
@@ -46,9 +55,10 @@ fn connect() -> TcpStream {
 // ==================== Basic Commands ====================
 
 #[test]
-fn test_01_ping() {
-    let mut server = start_server();
-    let mut stream = connect();
+fn base_01_ping() {
+    let port = next_port();
+    let mut server = start_server_on(port);
+    let mut stream = connect_to(port);
 
     let resp = send_resp(&mut stream, &["PING"]);
     assert_eq!(resp, "+PONG\r\n");
@@ -57,9 +67,10 @@ fn test_01_ping() {
 }
 
 #[test]
-fn test_02_multiple_pings() {
-    let mut server = start_server();
-    let mut stream = connect();
+fn base_02_multiple_pings() {
+    let port = next_port();
+    let mut server = start_server_on(port);
+    let mut stream = connect_to(port);
 
     for _ in 0..3 {
         let resp = send_resp(&mut stream, &["PING"]);
@@ -70,12 +81,13 @@ fn test_02_multiple_pings() {
 }
 
 #[test]
-fn test_03_concurrent_clients() {
-    let mut server = start_server();
+fn base_03_concurrent_clients() {
+    let port = next_port();
+    let mut server = start_server_on(port);
 
-    let mut c1 = connect();
-    let mut c2 = connect();
-    let mut c3 = connect();
+    let mut c1 = connect_to(port);
+    let mut c2 = connect_to(port);
+    let mut c3 = connect_to(port);
 
     assert_eq!(send_resp(&mut c1, &["PING"]), "+PONG\r\n");
     assert_eq!(send_resp(&mut c2, &["PING"]), "+PONG\r\n");
@@ -88,9 +100,10 @@ fn test_03_concurrent_clients() {
 }
 
 #[test]
-fn test_04_echo() {
-    let mut server = start_server();
-    let mut stream = connect();
+fn base_04_echo() {
+    let port = next_port();
+    let mut server = start_server_on(port);
+    let mut stream = connect_to(port);
 
     let resp = send_resp(&mut stream, &["ECHO", "apple"]);
     assert_eq!(resp, "$5\r\napple\r\n");
@@ -101,9 +114,10 @@ fn test_04_echo() {
 // ==================== SET / GET ====================
 
 #[test]
-fn test_05_set_get() {
-    let mut server = start_server();
-    let mut stream = connect();
+fn base_05_set_get() {
+    let port = next_port();
+    let mut server = start_server_on(port);
+    let mut stream = connect_to(port);
 
     let resp = send_resp(&mut stream, &["SET", "banana", "grape"]);
     assert_eq!(resp, "+OK\r\n");
@@ -115,9 +129,10 @@ fn test_05_set_get() {
 }
 
 #[test]
-fn test_06_expiry() {
-    let mut server = start_server();
-    let mut stream = connect();
+fn base_06_expiry() {
+    let port = next_port();
+    let mut server = start_server_on(port);
+    let mut stream = connect_to(port);
 
     let resp = send_resp(&mut stream, &["SET", "mango", "apple", "PX", "100"]);
     assert_eq!(resp, "+OK\r\n");
@@ -136,9 +151,10 @@ fn test_06_expiry() {
 // ==================== Lists ====================
 
 #[test]
-fn test_07_rpush_create() {
-    let mut server = start_server();
-    let mut stream = connect();
+fn list_01_rpush_create() {
+    let port = next_port();
+    let mut server = start_server_on(port);
+    let mut stream = connect_to(port);
 
     let resp = send_resp(&mut stream, &["RPUSH", "mylist", "orange"]);
     assert_eq!(resp, ":1\r\n");
@@ -147,9 +163,10 @@ fn test_07_rpush_create() {
 }
 
 #[test]
-fn test_08_rpush_append() {
-    let mut server = start_server();
-    let mut stream = connect();
+fn list_02_rpush_append() {
+    let port = next_port();
+    let mut server = start_server_on(port);
+    let mut stream = connect_to(port);
 
     assert_eq!(send_resp(&mut stream, &["RPUSH", "mylist", "pear"]), ":1\r\n");
     assert_eq!(send_resp(&mut stream, &["RPUSH", "mylist", "grape"]), ":2\r\n");
@@ -159,9 +176,10 @@ fn test_08_rpush_append() {
 }
 
 #[test]
-fn test_09_rpush_multiple() {
-    let mut server = start_server();
-    let mut stream = connect();
+fn list_03_rpush_multiple() {
+    let port = next_port();
+    let mut server = start_server_on(port);
+    let mut stream = connect_to(port);
 
     let resp = send_resp(&mut stream, &["RPUSH", "mylist", "raspberry", "blueberry"]);
     assert_eq!(resp, ":2\r\n");
@@ -176,9 +194,10 @@ fn test_09_rpush_multiple() {
 }
 
 #[test]
-fn test_10_lrange_positive() {
-    let mut server = start_server();
-    let mut stream = connect();
+fn list_04_lrange_positive() {
+    let port = next_port();
+    let mut server = start_server_on(port);
+    let mut stream = connect_to(port);
 
     send_resp(
         &mut stream,
@@ -210,9 +229,10 @@ fn test_10_lrange_positive() {
 }
 
 #[test]
-fn test_11_lrange_negative() {
-    let mut server = start_server();
-    let mut stream = connect();
+fn list_05_lrange_negative() {
+    let port = next_port();
+    let mut server = start_server_on(port);
+    let mut stream = connect_to(port);
 
     send_resp(
         &mut stream,
@@ -244,9 +264,10 @@ fn test_11_lrange_negative() {
 }
 
 #[test]
-fn test_12_lpush() {
-    let mut server = start_server();
-    let mut stream = connect();
+fn list_06_lpush() {
+    let port = next_port();
+    let mut server = start_server_on(port);
+    let mut stream = connect_to(port);
 
     assert_eq!(send_resp(&mut stream, &["LPUSH", "mylist", "strawberry"]), ":1\r\n");
     assert_eq!(
@@ -262,9 +283,10 @@ fn test_12_lpush() {
 }
 
 #[test]
-fn test_13_llen() {
-    let mut server = start_server();
-    let mut stream = connect();
+fn list_07_llen() {
+    let port = next_port();
+    let mut server = start_server_on(port);
+    let mut stream = connect_to(port);
 
     send_resp(
         &mut stream,
@@ -278,9 +300,10 @@ fn test_13_llen() {
 }
 
 #[test]
-fn test_14_lpop_single() {
-    let mut server = start_server();
-    let mut stream = connect();
+fn list_08_lpop_single() {
+    let port = next_port();
+    let mut server = start_server_on(port);
+    let mut stream = connect_to(port);
 
     send_resp(
         &mut stream,
@@ -297,9 +320,10 @@ fn test_14_lpop_single() {
 }
 
 #[test]
-fn test_15_lpop_multiple() {
-    let mut server = start_server();
-    let mut stream = connect();
+fn list_09_lpop_multiple() {
+    let port = next_port();
+    let mut server = start_server_on(port);
+    let mut stream = connect_to(port);
 
     send_resp(
         &mut stream,
@@ -321,11 +345,12 @@ fn test_15_lpop_multiple() {
 // ==================== BLPOP ====================
 
 #[test]
-fn test_16_blpop() {
-    let mut server = start_server();
+fn list_10_blpop() {
+    let port = next_port();
+    let mut server = start_server_on(port);
 
-    let handle = thread::spawn(|| {
-        let mut stream = connect();
+    let handle = thread::spawn(move || {
+        let mut stream = connect_to(port);
         stream
             .set_read_timeout(Some(Duration::from_secs(5)))
             .unwrap();
@@ -334,7 +359,7 @@ fn test_16_blpop() {
 
     thread::sleep(Duration::from_millis(500));
 
-    let mut stream2 = connect();
+    let mut stream2 = connect_to(port);
     assert_eq!(send_resp(&mut stream2, &["RPUSH", "blocklist", "hello"]), ":1\r\n");
 
     let blpop_resp = handle.join().unwrap();
@@ -347,9 +372,10 @@ fn test_16_blpop() {
 }
 
 #[test]
-fn test_17_blpop_timeout_expires() {
-    let mut server = start_server();
-    let mut stream = connect();
+fn list_11_blpop_timeout_expires() {
+    let port = next_port();
+    let mut server = start_server_on(port);
+    let mut stream = connect_to(port);
     stream
         .set_read_timeout(Some(Duration::from_secs(5)))
         .unwrap();
@@ -361,11 +387,12 @@ fn test_17_blpop_timeout_expires() {
 }
 
 #[test]
-fn test_18_blpop_timeout_with_push() {
-    let mut server = start_server();
+fn list_12_blpop_timeout_with_push() {
+    let port = next_port();
+    let mut server = start_server_on(port);
 
-    let handle = thread::spawn(|| {
-        let mut stream = connect();
+    let handle = thread::spawn(move || {
+        let mut stream = connect_to(port);
         stream
             .set_read_timeout(Some(Duration::from_secs(5)))
             .unwrap();
@@ -374,7 +401,7 @@ fn test_18_blpop_timeout_with_push() {
 
     thread::sleep(Duration::from_millis(500));
 
-    let mut stream2 = connect();
+    let mut stream2 = connect_to(port);
     send_resp(&mut stream2, &["RPUSH", "tlist", "foo"]);
 
     let blpop_resp = handle.join().unwrap();
@@ -386,12 +413,13 @@ fn test_18_blpop_timeout_with_push() {
     server.kill().ok();
 }
 
-// ==================== TYPE command ====================
+// ==================== Streams - TYPE command ====================
 
 #[test]
-fn test_19_type_string() {
-    let mut server = start_server();
-    let mut stream = connect();
+fn stream_01_type_string() {
+    let port = next_port();
+    let mut server = start_server_on(port);
+    let mut stream = connect_to(port);
 
     send_resp(&mut stream, &["SET", "some_key", "foo"]);
 
@@ -402,9 +430,10 @@ fn test_19_type_string() {
 }
 
 #[test]
-fn test_20_type_list() {
-    let mut server = start_server();
-    let mut stream = connect();
+fn stream_02_type_list() {
+    let port = next_port();
+    let mut server = start_server_on(port);
+    let mut stream = connect_to(port);
 
     send_resp(&mut stream, &["RPUSH", "mylist", "a"]);
 
@@ -416,9 +445,10 @@ fn test_20_type_list() {
 // ==================== Streams - XADD ====================
 
 #[test]
-fn test_21_xadd_create() {
-    let mut server = start_server();
-    let mut stream = connect();
+fn stream_03_xadd_create() {
+    let port = next_port();
+    let mut server = start_server_on(port);
+    let mut stream = connect_to(port);
 
     let resp = send_resp(&mut stream, &["XADD", "stream_key", "0-1", "foo", "bar"]);
     assert_eq!(resp, "$3\r\n0-1\r\n");
@@ -431,9 +461,10 @@ fn test_21_xadd_create() {
 // ==================== Streams - Validate entry IDs ====================
 
 #[test]
-fn test_22_xadd_validate_ids() {
-    let mut server = start_server();
-    let mut stream = connect();
+fn stream_04_xadd_validate_ids() {
+    let port = next_port();
+    let mut server = start_server_on(port);
+    let mut stream = connect_to(port);
 
     assert_eq!(
         send_resp(&mut stream, &["XADD", "s", "1-1", "foo", "bar"]),
@@ -462,9 +493,10 @@ fn test_22_xadd_validate_ids() {
 // ==================== Streams - Partially auto-generated IDs ====================
 
 #[test]
-fn test_23_xadd_partial_auto_id() {
-    let mut server = start_server();
-    let mut stream = connect();
+fn stream_05_xadd_partial_auto_id() {
+    let port = next_port();
+    let mut server = start_server_on(port);
+    let mut stream = connect_to(port);
 
     assert_eq!(
         send_resp(&mut stream, &["XADD", "s", "0-*", "foo", "bar"]),
@@ -485,9 +517,10 @@ fn test_23_xadd_partial_auto_id() {
 // ==================== Streams - Fully auto-generated IDs ====================
 
 #[test]
-fn test_24_xadd_full_auto_id() {
-    let mut server = start_server();
-    let mut stream = connect();
+fn stream_06_xadd_full_auto_id() {
+    let port = next_port();
+    let mut server = start_server_on(port);
+    let mut stream = connect_to(port);
 
     let resp = send_resp(&mut stream, &["XADD", "s", "*", "foo", "bar"]);
     assert!(resp.starts_with('$'), "expected bulk string, got: {}", resp);
@@ -499,9 +532,10 @@ fn test_24_xadd_full_auto_id() {
 // ==================== Streams - XRANGE ====================
 
 #[test]
-fn test_25_xrange() {
-    let mut server = start_server();
-    let mut stream = connect();
+fn stream_07_xrange() {
+    let port = next_port();
+    let mut server = start_server_on(port);
+    let mut stream = connect_to(port);
 
     send_resp(&mut stream, &["XADD", "s", "0-1", "foo", "bar"]);
     send_resp(&mut stream, &["XADD", "s", "0-2", "bar", "baz"]);
@@ -517,9 +551,10 @@ fn test_25_xrange() {
 }
 
 #[test]
-fn test_26_xrange_start_dash() {
-    let mut server = start_server();
-    let mut stream = connect();
+fn stream_08_xrange_start_dash() {
+    let port = next_port();
+    let mut server = start_server_on(port);
+    let mut stream = connect_to(port);
 
     send_resp(&mut stream, &["XADD", "s", "0-1", "foo", "bar"]);
     send_resp(&mut stream, &["XADD", "s", "0-2", "bar", "baz"]);
@@ -535,9 +570,10 @@ fn test_26_xrange_start_dash() {
 }
 
 #[test]
-fn test_27_xrange_end_plus() {
-    let mut server = start_server();
-    let mut stream = connect();
+fn stream_09_xrange_end_plus() {
+    let port = next_port();
+    let mut server = start_server_on(port);
+    let mut stream = connect_to(port);
 
     send_resp(&mut stream, &["XADD", "s", "0-1", "foo", "bar"]);
     send_resp(&mut stream, &["XADD", "s", "0-2", "bar", "baz"]);
@@ -555,9 +591,10 @@ fn test_27_xrange_end_plus() {
 // ==================== Streams - XREAD ====================
 
 #[test]
-fn test_28_xread_single() {
-    let mut server = start_server();
-    let mut stream = connect();
+fn stream_10_xread_single() {
+    let port = next_port();
+    let mut server = start_server_on(port);
+    let mut stream = connect_to(port);
 
     send_resp(&mut stream, &["XADD", "s", "0-1", "temperature", "96"]);
 
@@ -571,9 +608,10 @@ fn test_28_xread_single() {
 }
 
 #[test]
-fn test_29_xread_multiple() {
-    let mut server = start_server();
-    let mut stream = connect();
+fn stream_11_xread_multiple() {
+    let port = next_port();
+    let mut server = start_server_on(port);
+    let mut stream = connect_to(port);
 
     send_resp(&mut stream, &["XADD", "s1", "0-1", "temperature", "95"]);
     send_resp(&mut stream, &["XADD", "s2", "0-2", "humidity", "97"]);
@@ -593,14 +631,15 @@ fn test_29_xread_multiple() {
 // ==================== Streams - XREAD blocking ====================
 
 #[test]
-fn test_30_xread_block_with_data() {
-    let mut server = start_server();
-    let mut stream1 = connect();
+fn stream_12_xread_block_with_data() {
+    let port = next_port();
+    let mut server = start_server_on(port);
+    let mut stream1 = connect_to(port);
 
     send_resp(&mut stream1, &["XADD", "s", "0-1", "temperature", "96"]);
 
-    let handle = thread::spawn(|| {
-        let mut stream = connect();
+    let handle = thread::spawn(move || {
+        let mut stream = connect_to(port);
         stream
             .set_read_timeout(Some(Duration::from_secs(5)))
             .unwrap();
@@ -612,7 +651,7 @@ fn test_30_xread_block_with_data() {
 
     thread::sleep(Duration::from_millis(500));
 
-    let mut stream2 = connect();
+    let mut stream2 = connect_to(port);
     send_resp(&mut stream2, &["XADD", "s", "0-2", "temperature", "95"]);
 
     let resp = handle.join().unwrap();
@@ -625,9 +664,10 @@ fn test_30_xread_block_with_data() {
 }
 
 #[test]
-fn test_31_xread_block_timeout() {
-    let mut server = start_server();
-    let mut stream = connect();
+fn stream_13_xread_block_timeout() {
+    let port = next_port();
+    let mut server = start_server_on(port);
+    let mut stream = connect_to(port);
 
     send_resp(&mut stream, &["XADD", "s", "0-1", "temperature", "96"]);
 
@@ -646,14 +686,15 @@ fn test_31_xread_block_timeout() {
 // ==================== Streams - XREAD blocking without timeout ====================
 
 #[test]
-fn test_32_xread_block_indefinite() {
-    let mut server = start_server();
-    let mut stream1 = connect();
+fn stream_14_xread_block_indefinite() {
+    let port = next_port();
+    let mut server = start_server_on(port);
+    let mut stream1 = connect_to(port);
 
     send_resp(&mut stream1, &["XADD", "s", "0-1", "temperature", "96"]);
 
-    let handle = thread::spawn(|| {
-        let mut stream = connect();
+    let handle = thread::spawn(move || {
+        let mut stream = connect_to(port);
         stream
             .set_read_timeout(Some(Duration::from_secs(10)))
             .unwrap();
@@ -665,7 +706,7 @@ fn test_32_xread_block_indefinite() {
 
     thread::sleep(Duration::from_millis(1500));
 
-    let mut stream2 = connect();
+    let mut stream2 = connect_to(port);
     send_resp(&mut stream2, &["XADD", "s", "0-2", "temperature", "95"]);
 
     let resp = handle.join().unwrap();
@@ -680,14 +721,15 @@ fn test_32_xread_block_indefinite() {
 // ==================== Streams - XREAD blocking with $ ====================
 
 #[test]
-fn test_33_xread_block_dollar() {
-    let mut server = start_server();
-    let mut stream1 = connect();
+fn stream_15_xread_block_dollar() {
+    let port = next_port();
+    let mut server = start_server_on(port);
+    let mut stream1 = connect_to(port);
 
     send_resp(&mut stream1, &["XADD", "s", "0-1", "temperature", "96"]);
 
-    let handle = thread::spawn(|| {
-        let mut stream = connect();
+    let handle = thread::spawn(move || {
+        let mut stream = connect_to(port);
         stream
             .set_read_timeout(Some(Duration::from_secs(10)))
             .unwrap();
@@ -699,7 +741,7 @@ fn test_33_xread_block_dollar() {
 
     thread::sleep(Duration::from_millis(500));
 
-    let mut stream2 = connect();
+    let mut stream2 = connect_to(port);
     send_resp(&mut stream2, &["XADD", "s", "0-2", "temperature", "95"]);
 
     let resp = handle.join().unwrap();
@@ -712,9 +754,10 @@ fn test_33_xread_block_dollar() {
 }
 
 #[test]
-fn test_34_xread_block_dollar_timeout() {
-    let mut server = start_server();
-    let mut stream = connect();
+fn stream_16_xread_block_dollar_timeout() {
+    let port = next_port();
+    let mut server = start_server_on(port);
+    let mut stream = connect_to(port);
 
     send_resp(&mut stream, &["XADD", "s", "0-1", "temperature", "96"]);
 
