@@ -284,26 +284,63 @@ async fn push(elements: &[RedisValueRef], arc: &Store, front: bool) -> Vec<u8> {
         let mut store = arc.lock().await;
         let key_string = String::from_utf8_lossy(key).to_string();
 
-        let entry = store
-            .data
-            .entry(key_string)
-            .or_insert(RedisValue::List(vec![]));
+        let len = {
+            let entry = store
+                .data
+                .entry(key_string.clone())
+                .or_insert(RedisValue::List(vec![]));
 
-        match entry {
-            RedisValue::List(liste) => {
-                for value in &elements[2..] {
-                    if let RedisValueRef::String(v) = value {
-                        if front {
-                            liste.insert(0, String::from_utf8_lossy(v).to_string());
-                        } else {
-                            liste.push(String::from_utf8_lossy(v).to_string());
+            match entry {
+                RedisValue::List(liste) => {
+                    for value in &elements[2..] {
+                        if let RedisValueRef::String(v) = value {
+                            let element: String = String::from_utf8_lossy(v).to_string();
+                            if front {
+                                liste.insert(0, element);
+                            } else {
+                                liste.push(element);
+                            }
                         }
                     }
+                    liste.len()
                 }
-                return resp_int(liste.len());
+                _ => return resp_error("not a list"),
             }
-            _ => return resp_error("not a list"),
+        };
+
+        let entry = store.waiters.get_mut(&key_string);
+        match entry {
+            Some(entry) => {
+                let tx = entry.pop_front();
+                match tx {
+                    Some(tx) => {
+                        let liste = store.data.get_mut(&key_string);
+                        match liste {
+                            Some(liste) => {
+                                if let RedisValue::List(liste) = liste {
+                                    // remove l'index 0 (fais le job de blpop) puis on le notifie du succes
+                                    let val: String = liste.remove(0);
+                                    let _ = tx.send(val);
+                                } else {
+                                    // not a list
+                                }
+                            }
+                            None => {
+                                // Liste non existante
+                            }
+                        };
+                    }
+                    None => {
+                        // Il n'y a pas de waiters
+                    }
+                }
+            }
+            None => {
+                // Il n'y a pas de liste, pas normal je pense
+            }
         }
+
+        return resp_int(len);
     } else {
         return resp_error("list argument is not a string for RPUSH");
     };

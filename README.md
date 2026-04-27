@@ -24,7 +24,7 @@ src/
   main.rs         -- TCP server, command dispatcher, command implementations, RESP response helpers
   resp_parser.rs  -- RESP protocol decoder (implements tokio_util::codec::Decoder)
 tests/
-  integration.rs  -- 34 integration tests reproducing CodeCrafters test suite
+  integration.rs  -- integration tests (reproducing CodeCrafters test suite)
 ```
 
 ## Run
