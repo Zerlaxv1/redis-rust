@@ -623,7 +623,7 @@ async fn cmd_xadd(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
                     }
 
                     if ms == 0 && seq == 0 {
-                        return resp_error("The ID specified in XADD is equal or smaller than the target stream top item");
+                        return resp_error("The ID specified in XADD must be greater than 0-0");
                     };
 
                     let mut vec: Vec<(String, String)> = vec![];
