@@ -16,6 +16,7 @@ mod resp_parser;
 enum RedisValue {
     String(String, Option<Instant>),
     List(Vec<String>),
+    Stream(Vec<(String, Vec<(String, String)>)>),
 }
 
 struct Server {
@@ -139,6 +140,7 @@ async fn handle_command(value: RedisValueRef, arc: &Store) -> Vec<u8> {
                     b"LPOP" => cmd_lpop(&elements, arc).await,
                     b"BLPOP" => cmd_blpop(&elements, arc).await,
                     b"TYPE" => cmd_type(&elements, arc).await,
+                    b"XADD" => cmd_xadd(&elements, arc).await,
                     _ => resp_error("command not supported"),
                 },
                 _ => resp_error("command must be a STRING"),
@@ -558,19 +560,67 @@ async fn cmd_type(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
         let key = store.data.get(&key_string);
 
         match key {
-            Some(key) => {
-                match key {
-                    RedisValue::String(_, _) => {
-                        return resp_simple("string");
-                    }
-                    RedisValue::List(_) => {
-                        return resp_simple("list");
-                    }
+            Some(key) => match key {
+                RedisValue::String(_, _) => {
+                    return resp_simple("string");
                 }
-            }
+                RedisValue::List(_) => {
+                    return resp_simple("list");
+                }
+                RedisValue::Stream(_) => {
+                    return resp_simple("stream");
+                }
+            },
             None => resp_simple("none"),
         }
     } else {
         resp_error("not a string")
+    }
+}
+
+async fn cmd_xadd(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
+    let elements_div_2 = elements.len() % 2 == 0;
+    if elements_div_2 {
+        // pas d'ID
+        resp_error("not implemented !")
+    } else {
+        // avec ID
+        if elements.len() < 5 {
+            return resp_error("wrong number of arguments for XADD");
+        }
+
+        if let RedisValueRef::String(stream) = &elements[1] {
+            let mut store = arc.lock().await;
+            let stream_string = String::from_utf8_lossy(&stream).to_string();
+            let entry = store
+                .data
+                .entry(stream_string)
+                .or_insert(RedisValue::Stream(vec![]));
+            if let RedisValue::Stream(stream) = entry {
+                if let RedisValueRef::String(id) = &elements[2] {
+                    let mut vec: Vec<(String, String)> = vec![];
+                    for pairs in elements[3..].chunks(2) {
+                        if let RedisValueRef::String(key) = &pairs[0]
+                            && let RedisValueRef::String(val) = &pairs[1]
+                        {
+                            vec.push((
+                                String::from_utf8_lossy(&key).to_string(),
+                                String::from_utf8_lossy(&val).to_string(),
+                            ))
+                        }
+                    }
+                    let id_string: String = String::from_utf8_lossy(&id).to_string();
+                    let reponse = resp_bulk(&id_string);
+                    stream.push((id_string, vec));
+                    return reponse;
+                } else {
+                    resp_error("")
+                }
+            } else {
+                resp_error("msg")
+            }
+        } else {
+            resp_error("not a string")
+        }
     }
 }
