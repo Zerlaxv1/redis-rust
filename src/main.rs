@@ -138,6 +138,7 @@ async fn handle_command(value: RedisValueRef, arc: &Store) -> Vec<u8> {
                     b"LLEN" => cmd_llen(&elements, arc).await,
                     b"LPOP" => cmd_lpop(&elements, arc).await,
                     b"BLPOP" => cmd_blpop(&elements, arc).await,
+                    b"TYPE" => cmd_type(&elements, arc).await,
                     _ => resp_error("command not supported"),
                 },
                 _ => resp_error("command must be a STRING"),
@@ -541,6 +542,34 @@ async fn cmd_blpop(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
                     }
                 }
             }
+        }
+    } else {
+        resp_error("not a string")
+    }
+}
+
+async fn cmd_type(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
+    if elements.len() != 2 {
+        return resp_error("wrong number of arguments for TYPE");
+    }
+    if let RedisValueRef::String(key) = &elements[1] {
+        let store = arc.lock().await;
+        let key_string = String::from_utf8_lossy(&key).to_string();
+        let key = store.data.get(&key_string);
+
+        match key {
+            Some(key) => {
+                match key {
+                    RedisValue::String(_, _) => {
+                        resp_bulk("string");
+                    }
+                    RedisValue::List(_) => {
+                        resp_bulk("liste");
+                    }
+                }
+                resp_error("not supported")
+            }
+            None => resp_bulk("none"),
         }
     } else {
         resp_error("not a string")
