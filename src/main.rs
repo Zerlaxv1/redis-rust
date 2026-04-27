@@ -27,8 +27,18 @@ type Store = Arc<Mutex<Server>>;
 
 #[tokio::main]
 async fn main() {
+    let args: Vec<String> = std::env::args().collect();
+
+    let adress: &str = if args.len() == 2 {
+        &args[1]
+    } else {
+        "127.0.0.1:6379"
+    };
+
     // bind to :6379
-    let listener: TcpListener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
+    let listener: TcpListener = TcpListener::bind(adress).await.unwrap();
+
+    println!("Server Listening on {}", adress);
 
     let data: HashMap<String, RedisValue> = HashMap::new();
     let waiters: HashMap<String, VecDeque<oneshot::Sender<String>>> = HashMap::new();
