@@ -604,6 +604,24 @@ async fn cmd_xadd(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
 
                     let seq: u64 = id_split[1].parse().unwrap_or(0u64);
 
+                    let last_stream_element = stream.get(stream.len() - 1);
+                    match last_stream_element {
+                        Some(element) => {
+                            let element_split: Vec<&str> = element.0.split("-").collect();
+                            let element_ms: u64 = element_split[0].parse().unwrap_or(0u64);
+                            if ms < element_ms {
+                                return resp_error("invalid ID");
+                            }
+                            if ms == element_ms {
+                                let element_seq: u64 = element_split[1].parse().unwrap_or(0u64);
+                                if seq <= element_seq {
+                                    return resp_error("invalid ID");
+                                }
+                            }
+                        }
+                        None => {}
+                    }
+
                     if ms == 0 && seq == 0 {
                         return resp_error("invalid ID");
                     };
