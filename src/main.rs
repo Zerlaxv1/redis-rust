@@ -495,7 +495,7 @@ async fn cmd_blpop(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
             None => {
                 let (tx, rx) = oneshot::channel();
 
-                let timeout_secs: u64 = String::from_utf8_lossy(timeout).parse().unwrap();
+                let timeout_secs: f64 = String::from_utf8_lossy(timeout).parse().unwrap();
 
                 store
                     .waiters
@@ -505,13 +505,13 @@ async fn cmd_blpop(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
 
                 drop(store);
 
-                if timeout_secs == 0 {
+                if timeout_secs == 0f64 {
                     match rx.await {
                         Ok(value) => resp_array(&[liste_string, value]),
                         Err(_) => resp_null_array(),
                     }
                 } else {
-                    match tokio::time::timeout(Duration::from_secs(timeout_secs), rx).await {
+                    match tokio::time::timeout(Duration::from_secs_f64(timeout_secs), rx).await {
                         Ok(Ok(value)) => resp_array(&[liste_string, value]),
                         _ => resp_null_array(),
                     }
