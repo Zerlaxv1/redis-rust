@@ -27,18 +27,7 @@ type Store = Arc<Mutex<Server>>;
 
 #[tokio::main]
 async fn main() {
-    let args: Vec<String> = std::env::args().collect();
-
-    let adress: &str = if args.len() == 2 {
-        &args[1]
-    } else {
-        "127.0.0.1:6379"
-    };
-
-    // bind to :6379
-    let listener: TcpListener = TcpListener::bind(adress).await.unwrap();
-
-    println!("Server Listening on {}", adress);
+    let listener: TcpListener = find_listener(6379).await;
 
     let data: HashMap<String, RedisValue> = HashMap::new();
     let waiters: HashMap<String, VecDeque<oneshot::Sender<String>>> = HashMap::new();
@@ -55,6 +44,31 @@ async fn main() {
         tokio::spawn(async move {
             handle_connection(stream, arc_clone).await;
         });
+    }
+}
+
+async fn find_listener(start_port: u16) -> TcpListener {
+    let args: Vec<String> = std::env::args().collect();
+    let mut address: String;
+
+    if args.len() == 2 {
+        address = args[1].clone();
+        TcpListener::bind(address).await.unwrap()
+    } else {
+        for port in start_port..20000 {
+            address = format!("127.0.0.1:{}", port);
+            let listener = TcpListener::bind(&address).await;
+            match listener {
+                Ok(listener) => {
+                    println!("Server Listening on {}", address);
+                    return listener;
+                }
+                Err(_) => {
+                    continue;
+                }
+            };
+        }
+        panic!("impossible de trouver un port disponible !")
     }
 }
 
