@@ -561,15 +561,15 @@ async fn cmd_type(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
             Some(key) => {
                 match key {
                     RedisValue::String(_, _) => {
-                        resp_bulk("string");
+                        resp_simple("string");
                     }
                     RedisValue::List(_) => {
-                        resp_bulk("liste");
+                        resp_simple("liste");
                     }
                 }
                 resp_error("not supported")
             }
-            None => resp_bulk("none"),
+            None => resp_simple("none"),
         }
     } else {
         resp_error("not a string")
