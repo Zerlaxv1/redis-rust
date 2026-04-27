@@ -598,7 +598,18 @@ async fn cmd_xadd(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
                 .or_insert(RedisValue::Stream(vec![]));
             if let RedisValue::Stream(stream) = entry {
                 if let RedisValueRef::String(id) = &elements[2] {
+                    let id_string: String = String::from_utf8_lossy(&id).to_string();
+                    let id_split: Vec<&str> = id_string.split("-").collect();
+                    let ms: u64 = id_split[0].parse().unwrap_or(0u64);
+
+                    let seq: u64 = id_split[1].parse().unwrap_or(0u64);
+
+                    if ms == 0 && seq == 0 {
+                        return resp_error("invalid ID");
+                    };
+
                     let mut vec: Vec<(String, String)> = vec![];
+
                     for pairs in elements[3..].chunks(2) {
                         if let RedisValueRef::String(key) = &pairs[0]
                             && let RedisValueRef::String(val) = &pairs[1]
@@ -609,9 +620,10 @@ async fn cmd_xadd(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
                             ))
                         }
                     }
-                    let id_string: String = String::from_utf8_lossy(&id).to_string();
+
                     let reponse = resp_bulk(&id_string);
                     stream.push((id_string, vec));
+
                     return reponse;
                 } else {
                     resp_error("")
