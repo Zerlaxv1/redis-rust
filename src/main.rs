@@ -628,34 +628,74 @@ async fn cmd_xadd(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
                 if let RedisValueRef::String(id) = &elements[2] {
                     let id_string: String = String::from_utf8_lossy(&id).to_string();
                     let id_split: Vec<&str> = id_string.split("-").collect();
-                    let ms: u64 = id_split[0].parse().unwrap_or(0u64);
+                    let id: String;
+                    if id_string.trim() == "*" {
+                        // Fully auto-generated IDs
+                        id = id_string;
+                    } else {
+                        let ms: u64 = id_split[0].parse().unwrap_or(0u64);
+                        if id_split[1].trim() == "*" {
+                            // Partially auto-generated IDs
+                            let last_stream_element = stream.get(stream.len() - 1);
+                            match last_stream_element {
+                                Some(element) => {
+                                    let element_split: Vec<&str> = element.0.split("-").collect();
+                                    let element_ms: u64 = element_split[0].parse().unwrap_or(0u64);
+                                    if ms < element_ms {
+                                        return resp_error(
+                                            "The ID specified in XADD is equal or smaller than the target stream top item",
+                                        );
+                                    } else if ms == element_ms {
+                                        let element_seq: u64 =
+                                            element_split[1].parse().unwrap_or(0u64);
 
-                    let seq: u64 = id_split[1].parse().unwrap_or(0u64);
-
-                    if ms == 0 && seq == 0 {
-                        return resp_error("The ID specified in XADD must be greater than 0-0");
-                    };
-
-                    let last_stream_element = stream.get(stream.len() - 1);
-                    match last_stream_element {
-                        Some(element) => {
-                            let element_split: Vec<&str> = element.0.split("-").collect();
-                            let element_ms: u64 = element_split[0].parse().unwrap_or(0u64);
-                            if ms < element_ms {
-                                return resp_error(
-                                    "The ID specified in XADD is equal or smaller than the target stream top item",
-                                );
-                            }
-                            if ms == element_ms {
-                                let element_seq: u64 = element_split[1].parse().unwrap_or(0u64);
-                                if seq <= element_seq {
-                                    return resp_error(
-                                        "The ID specified in XADD is equal or smaller than the target stream top item",
-                                    );
+                                        id = format!("{}-{}", ms, element_seq + 1);
+                                    } else {
+                                        id = format!("{}-{}", ms, 0);
+                                    }
+                                }
+                                None => {
+                                    if ms == 0 {
+                                        id = format!("{}-{}", ms, 1);
+                                    } else {
+                                        id = format!("{}-{}", ms, 0);
+                                    }
                                 }
                             }
+                        } else {
+                            // Manual IDs
+                            let seq: u64 = id_split[1].parse().unwrap_or(0u64);
+                            id = id_string;
+
+                            if ms == 0 && seq == 0 {
+                                return resp_error(
+                                    "The ID specified in XADD must be greater than 0-0",
+                                );
+                            };
+
+                            let last_stream_element = stream.get(stream.len() - 1);
+                            match last_stream_element {
+                                Some(element) => {
+                                    let element_split: Vec<&str> = element.0.split("-").collect();
+                                    let element_ms: u64 = element_split[0].parse().unwrap_or(0u64);
+                                    if ms < element_ms {
+                                        return resp_error(
+                                            "The ID specified in XADD is equal or smaller than the target stream top item",
+                                        );
+                                    }
+                                    if ms == element_ms {
+                                        let element_seq: u64 =
+                                            element_split[1].parse().unwrap_or(0u64);
+                                        if seq <= element_seq {
+                                            return resp_error(
+                                                "The ID specified in XADD is equal or smaller than the target stream top item",
+                                            );
+                                        }
+                                    }
+                                }
+                                None => {}
+                            }
                         }
-                        None => {}
                     }
 
                     let mut vec: Vec<(String, String)> = vec![];
@@ -671,8 +711,8 @@ async fn cmd_xadd(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
                         }
                     }
 
-                    let reponse = resp_bulk(&id_string);
-                    stream.push((id_string, vec));
+                    let reponse = resp_bulk(&id);
+                    stream.push((id, vec));
 
                     return reponse;
                 } else {
