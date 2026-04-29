@@ -1,6 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::{Mutex, oneshot};
 use tokio::{
     io::AsyncWriteExt,
@@ -631,7 +631,38 @@ async fn cmd_xadd(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
                     let id: String;
                     if id_string.trim() == "*" {
                         // Fully auto-generated IDs
-                        id = id_string;
+                        let time: Result<Duration, std::time::SystemTimeError> =
+                            SystemTime::now().duration_since(UNIX_EPOCH);
+                        match time {
+                            Ok(ms) => {
+                                let ms = ms.as_millis();
+                                let last_stream_element = stream.get(stream.len() - 1);
+                                match last_stream_element {
+                                    Some(element) => {
+                                        let element_split: Vec<&str> =
+                                            element.0.split("-").collect();
+                                        let element_ms: u128 =
+                                            element_split[0].parse().unwrap_or(0);
+                                        if ms < element_ms {
+                                            return resp_error(
+                                                "The auto generated ID in XADD is smaller than the target stream top item",
+                                            );
+                                        } else if ms == element_ms {
+                                            let element_seq: u64 =
+                                                element_split[1].parse().unwrap_or(0u64);
+
+                                            id = format!("{}-{}", ms, element_seq + 1);
+                                        } else {
+                                            id = format!("{}-{}", ms, 0);
+                                        }
+                                    }
+                                    None => {}
+                                }
+                            }
+                            Err(e) => {
+                                return resp_error(&e.to_string());
+                            }
+                        }
                     } else {
                         let ms: u64 = id_split[0].parse().unwrap_or(0u64);
                         if id_split[1].trim() == "*" {
