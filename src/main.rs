@@ -513,8 +513,36 @@ async fn cmd_blpop(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
         match liste {
             Some(liste) => {
                 if let RedisValue::List(liste) = liste {
-                    let removed = liste.remove(0);
-                    return resp_array(&[liste_string, removed]);
+                    if liste.len() == 0 {
+                        let (tx, rx) = oneshot::channel();
+
+                        let timeout_secs: f64 = String::from_utf8_lossy(timeout).parse().unwrap();
+
+                        store
+                            .waiters
+                            .entry(liste_string.clone())
+                            .or_insert(VecDeque::new())
+                            .push_back(tx);
+
+                        drop(store);
+
+                        if timeout_secs == 0f64 {
+                            match rx.await {
+                                Ok(value) => resp_array(&[liste_string, value]),
+                                Err(_) => resp_null_array(),
+                            }
+                        } else {
+                            match tokio::time::timeout(Duration::from_secs_f64(timeout_secs), rx)
+                                .await
+                            {
+                                Ok(Ok(value)) => resp_array(&[liste_string, value]),
+                                _ => resp_null_array(),
+                            }
+                        }
+                    } else {
+                        let removed = liste.remove(0);
+                        return resp_array(&[liste_string, removed]);
+                    }
                 } else {
                     return resp_null_bulk();
                 }
