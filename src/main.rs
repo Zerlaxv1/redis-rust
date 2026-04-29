@@ -657,7 +657,7 @@ async fn cmd_xadd(elements: &[RedisValueRef], arc: &Store) -> Vec<u8> {
                                         }
                                     }
                                     None => {
-                                        id = id_string;
+                                        id = format!("{}-{}", ms, 0);
                                     }
                                 }
                             }
